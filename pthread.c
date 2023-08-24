@@ -34,7 +34,6 @@ ABT_pool abt_pools[MAX_CORE];
 ABT_mutex mutex_map_mutex;
 ABT_mutex cond_map_mutex;
 
-static std::map<int, ABT_xstream> tid_map;
 static std::map<pthread_cond_t *, ABT_cond *> cond_map;
 static std::map<pthread_mutex_t *, ABT_mutex *> mutex_map;
 static std::map<pthread_key_t, ABT_key *> key_map;
@@ -52,29 +51,12 @@ ensure_abt_initialized()
   if (ABT_initialized() == ABT_ERR_UNINITIALIZED) {
     int ret;
     ret = ABT_init(0, NULL);
-    uint64_t id;
-    int ret2 = ABT_self_get_thread_id(&id);
-    printf("%s %d %d %d\n", __func__, __LINE__, id, ret2);
-    printf("%s %d %d\n", __func__, __LINE__, ret);
     for (int i=0; i<MAX_CORE; i++) {
       ret = ABT_xstream_create(ABT_SCHED_NULL, &abt_xstreams[i]);
-      //printf("%s %d %d\n", __func__, __LINE__, ret);
       ret = ABT_xstream_get_main_pools(abt_xstreams[i], 1, &abt_pools[i]);
-      //printf("%s %d %d\n", __func__, __LINE__, ret);
-      //tid_map[ABT_xstream_gettid(abt_xstreams[i])] = abt_xstreams[i];
     }
     ABT_mutex_create(&mutex_map_mutex);
     ABT_mutex_create(&cond_map_mutex);
-    
-    for (int i=0; i<MAX_CORE; i++) {
-      while (1) {
-	if (ABT_xstream_gettid(abt_xstreams[i]) != -1) {
-	  break;
-	}
-      }
-      printf("tid %d\n", ABT_xstream_gettid(abt_xstreams[i]));
-      //tid_map[ABT_xstream_gettid(abt_xstreams[i])] = abt_xstreams[i];
-    }
   }
 }
 
