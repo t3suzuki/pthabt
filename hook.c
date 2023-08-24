@@ -4,6 +4,7 @@
 #include <abt.h>
 
 #include "common.h"
+#include "real_pthread.h"
 
 extern "C" {
 typedef long (*syscall_fn_t)(long, long, long, long, long, long, long);
@@ -21,13 +22,13 @@ void *
 syscall_helper()
 {
 
-  pthread_mutex_init(&mutex, NULL);
-  pthread_cond_init(&cond, NULL);
+  real_pthread_mutex_init(&mutex, NULL);
+  real_pthread_cond_init(&cond, NULL);
   
   while (1) {
-    pthread_mutex_lock(&mutex);
-    pthread_cond_wait(&cond, &mutex);
-    pthread_mutex_unlock(&mutex);
+    real_pthread_mutex_lock(&mutex);
+    real_pthread_cond_wait(&cond, &mutex);
+    real_pthread_mutex_unlock(&mutex);
     printf("[helper] go to sleep...\n");
     ret = next_sys_call(arg[1], arg[2], arg[3], arg[4], arg[5], arg[6], arg[7]);
     printf("[helper] wakeup!\n");
@@ -40,10 +41,18 @@ static long hook_function(long a1, long a2, long a3,
 			  long a7)
 {
   //printf("output from hook_function: syscall number %ld\n", a1);
-  if (a1 == 230) {
-    int64_t id;
+  if (a1 == 24) {
+#if 0
+    uint64_t id;
     int ret2 = ABT_self_get_thread_id(&id);
-    printf("%s %d %d %d\n", __func__, __LINE__, id, ret2);
+    printf("%s %d %lu %d\n", __func__, __LINE__, id, ret2);
+#endif
+    ABT_thread_yield();
+  } else 
+  if (a1 == 230) {
+    uint64_t id;
+    int ret2 = ABT_self_get_thread_id(&id);
+    printf("%s %d %lu %d\n", __func__, __LINE__, id, ret2);
     //printf("[main] call syscall...\n");
     done = 0;
     arg[1] = a1;
@@ -56,9 +65,9 @@ static long hook_function(long a1, long a2, long a3,
 #if 1
     return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
 #else
-    pthread_mutex_lock(&mutex);
-    pthread_cond_signal(&cond);
-    pthread_mutex_unlock(&mutex);
+    real_pthread_mutex_lock(&mutex);
+    real_pthread_cond_signal(&cond);
+    real_pthread_mutex_unlock(&mutex);
     while (1) {
       if (done)
 	break;

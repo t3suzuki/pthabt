@@ -16,12 +16,13 @@ struct pthread_arg_t {
 void
 worker(void *_arg)
 {
+  printf("%s %d\n", __func__, __LINE__);
   pthread_arg_t *arg = (pthread_arg_t *)_arg;
   
   uint64_t iter = 0;
   while (!quit) {
-    //sched_yield();
-    sleep(1);
+    sched_yield();
+    //sleep(1);
     iter ++;
   }
   g_iter[arg->i_th] = iter;

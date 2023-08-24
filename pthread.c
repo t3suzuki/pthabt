@@ -83,9 +83,15 @@ int pthread_join(pthread_t pth, void **retval) {
   return ret;
 }
 
+#if 0
 int sched_yield() {
+  uint64_t id;
+  int ret2 = ABT_self_get_thread_id(&id);
+  printf("%s %d %lu %d\n", __func__, __LINE__, id, ret2);
+  
   return ABT_thread_yield();
 }
+#endif
 
 
 int pthread_cond_init(pthread_cond_t *cond,
