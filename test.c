@@ -2,9 +2,11 @@
 #include <stdio.h>
 #include <iostream>
 #include <unistd.h>
+#include <abt.h>
+#include "common.h"
 
 #define RUN_TIME (5)
-#define N_TH (256)
+#define N_TH (4)
 
 uint64_t g_iter[N_TH];
 static bool quit = false;
@@ -18,9 +20,18 @@ worker(void *_arg)
 {
   pthread_arg_t *arg = (pthread_arg_t *)_arg;
   
+  uint64_t id;
+  //printf("thread_id1 %p %d\n", mytls, *mytls);
+  int ret2 = ABT_self_get_thread_id(&id);
+  printf("id1 %s %d %d %d\n", __func__, __LINE__, id, ret2);
   uint64_t iter = 0;
   while (!quit) {
-    sched_yield();
+    //sched_yield();
+    sleep(1);
+  uint64_t id;
+  printf("thread_id2\n");
+  int ret2 = ABT_self_get_thread_id(&id);
+  printf("id2 %s %d %d %d\n", __func__, __LINE__, id, ret2);
     iter ++;
   }
   g_iter[arg->i_th] = iter;
