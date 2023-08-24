@@ -35,6 +35,7 @@ static syscall_fn_t next_sys_call = NULL;
     helpers[id].arg[4] = a5;
     helpers[id].arg[5] = a6;
     helpers[id].arg[6] = a7;
+    //printf("%d %d\n", id, a1);
     real_pthread_mutex_lock(&helpers[id].mutex);
     helpers[id].ready = true;
     real_pthread_cond_signal(&helpers[id].cond);
@@ -49,9 +50,11 @@ static syscall_fn_t next_sys_call = NULL;
       }
       h->ready = false;
       real_pthread_mutex_unlock(&h->mutex);
-      //printf("%p,%d syscall start\n", h, h->id);
+#if 1
       h->ret = next_sys_call(h->arg[0], h->arg[1], h->arg[2], h->arg[3], h->arg[4], h->arg[5], h->arg[6]);
-      //printf("%p,%d syscall end\n", h, h->id);
+#else
+      printf("id=%d, syscall=%d\n", h->id, h->arg[0]);
+#endif
       h->done = true;
     }
   }
@@ -61,14 +64,19 @@ static long hook_function(long a1, long a2, long a3,
 			  long a4, long a5, long a6,
 			  long a7)
 {
+  
   //printf("output from hook_function: syscall number %ld\n", a1);
+  //return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+  
   uint64_t abt_id;
   int ret = ABT_self_get_thread_id(&abt_id);
   if (ret == ABT_SUCCESS && (abt_id > 0)) {
     if (a1 == 24) { // sched_yield
       ABT_thread_yield();
-    } else if (a1 == 230) { // sleep
-      //printf("abt_id %d\n", abt_id);
+    } else if ((a1 == 202) || // futex
+	       (a1 == 1)) { // write
+      return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+    } else {
       req_helper(abt_id, a1, a2, a3, a4, a5, a6, a7);
       while (1) {
 	if (helpers[abt_id].done)
@@ -77,8 +85,6 @@ static long hook_function(long a1, long a2, long a3,
       }
       //printf("[main] syscall done! %d\n", abt_id);
       return helpers[abt_id].ret;
-    } else {
-      return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     }
   } else {
     return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
