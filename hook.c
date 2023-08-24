@@ -21,10 +21,8 @@ void *
 syscall_helper()
 {
 
-  printf("%s %d\n", __func__, __LINE__);
   pthread_mutex_init(&mutex, NULL);
   pthread_cond_init(&cond, NULL);
-  printf("%s %d\n", __func__, __LINE__);
   
   while (1) {
     pthread_mutex_lock(&mutex);
@@ -42,14 +40,10 @@ static long hook_function(long a1, long a2, long a3,
 			  long a7)
 {
   //printf("output from hook_function: syscall number %ld\n", a1);
-  //printf("a7 %d\n", a7);
   if (a1 == 230) {
-    //mytls_t *mytls = pthread_getspecific( mytls_key );
-    //printf("mytls %p %d\n", mytls, *mytls);
-    uint64_t id;
-    printf("hook tid %d\n", gettid());
+    int64_t id;
     int ret2 = ABT_self_get_thread_id(&id);
-    //printf("%s %d %d %d\n", __func__, __LINE__, id, ret2);
+    printf("%s %d %d %d\n", __func__, __LINE__, id, ret2);
     //printf("[main] call syscall...\n");
     done = 0;
     arg[1] = a1;
@@ -59,6 +53,9 @@ static long hook_function(long a1, long a2, long a3,
     arg[5] = a5;
     arg[6] = a6;
     arg[7] = a7;
+#if 1
+    return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+#else
     pthread_mutex_lock(&mutex);
     pthread_cond_signal(&cond);
     pthread_mutex_unlock(&mutex);
@@ -67,6 +64,7 @@ static long hook_function(long a1, long a2, long a3,
 	break;
       ABT_thread_yield();
     }
+#endif
     printf("[main] syscall done!\n");
     return ret;
   } else {
@@ -80,7 +78,7 @@ pthread_t pth;
 int __hook_init(long placeholder __attribute__((unused)),
 		void *sys_call_hook_ptr)
 {
-  pthread_create(&pth, NULL,  syscall_helper, NULL);
+  //pthread_create(&pth, NULL,  syscall_helper, NULL);
   sleep(1);
   printf("output from __hook_init: we can do some init work here\n");
 

@@ -755,7 +755,7 @@ extern "C" int __hook_init(long placeholder __attribute__((unused)),
 
 static void load_hook_lib(void)
 {
-#if 1
+#if 0
 	void *handle;
 	{
 		const char *filename;
