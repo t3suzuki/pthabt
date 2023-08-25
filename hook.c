@@ -3,13 +3,59 @@
 #include <unistd.h>
 #include <abt.h>
 #include <stack>
+#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <assert.h>
+#include <sys/syscall.h>
+#include <sys/mman.h>
+#include <dis-asm.h>
+#include <sched.h>
+#include <dlfcn.h>
+#include <pthread.h>
+#include <abt.h>
+#include <map>
+#include <set>
+#include <cassert>
+#include <dlfcn.h>
+#include <stdlib.h>
 
 #include "common.h"
 #include "real_pthread.h"
 
 #define N_HELPER (128)
 
+
 extern "C" {
+void (*debug_print)(int) = NULL;
+
+static void load_libmy(void)
+{
+	void *handle;
+	{
+	  const char *filename;
+	  filename = getenv("LIBMY");
+	  if (!filename) {
+	    fprintf(stderr, "env LIBMY is empty, so skip to load a hook library\n");
+	    return;
+	  }
+	  
+	  handle = dlmopen(LM_ID_NEWLM, filename, RTLD_NOW | RTLD_LOCAL);
+	  if (!handle) {
+	    fprintf(stderr, "dlmopen failed: %s\n\n", dlerror());
+	    fprintf(stderr, "NOTE: this may occur when the compilation of your hook function library misses some specifications in LDFLAGS. or if you are using a C++ compiler, dlmopen may fail to find a symbol, and adding 'extern \"C\"' to the definition may resolve the issue.\n");
+	    exit(1);
+	  }
+	  printf("ok!\n");
+	}
+	{
+	  debug_print = dlsym(handle, "__debug_print");
+	}
+}
+
 typedef long (*syscall_fn_t)(long, long, long, long, long, long, long);
 
 static syscall_fn_t next_sys_call = NULL;
@@ -77,6 +123,7 @@ static long hook_function(long a1, long a2, long a3,
 	       (a1 == 1)) { // write
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else {
+      debug_print(a1);
       req_helper(abt_id, a1, a2, a3, a4, a5, a6, a7);
       while (1) {
 	if (helpers[abt_id].done)
@@ -100,6 +147,8 @@ int __hook_init(long placeholder __attribute__((unused)),
   /* sleep(1); */
   /* printf("output from __hook_init: we can do some init work here\n"); */
 
+  load_libmy();
+  
   int i;
   for (i=0; i<N_HELPER; i++) {
     helpers[i].id = i;
