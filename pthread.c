@@ -256,6 +256,14 @@ int pthread_attr_init(pthread_attr_t *attr) {
   return 0;
 };
 
+int pthread_attr_setdetachstate(pthread_attr_t *attr, int) {
+  return 0;
+}
+
+int pthread_attr_destroy(pthread_attr_t *attr) {
+  return 0;
+};
+
 #if 0
 int pthread_key_create(pthread_key_t *key, void (*destructor)(void*)) {
   ABT_key *abt_key = (ABT_key *)malloc(sizeof(ABT_key));
