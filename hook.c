@@ -24,7 +24,7 @@
 
 
 extern "C" {
-void (*debug_print)(int) = NULL;
+  void (*debug_print)(int, int, int) = NULL;
 
 static void load_libmy(void)
 {
@@ -104,16 +104,20 @@ static long hook_function(long a1, long a2, long a3,
     if (a1 == 24) { // sched_yield
       ABT_thread_yield();
     } else if ((a1 == 202) || // futex
-	       (a1 == 9)) {   // mmap
+	       (a1 == 9) ||   // mmap
+	       (a1 == 10)) {   // mprotect
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else {
-      debug_print(a1);
+      if (debug_print)
+	debug_print(1, a1, abt_id);
       req_helper(abt_id, a1, a2, a3, a4, a5, a6, a7);
       while (1) {
 	if (helpers[abt_id].done)
 	  break;
 	ABT_thread_yield();
       }
+      if (debug_print)
+	debug_print(2, a1, abt_id);
       return helpers[abt_id].ret;
     }
   } else {

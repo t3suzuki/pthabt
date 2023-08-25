@@ -63,7 +63,9 @@ int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
   
   int ret = ABT_thread_create(abt_pools[tid % MAX_CORE], start_routine, arg,
 			      ABT_THREAD_ATTR_NULL, &abt_threads[tid]);
+#if __PTHREAD_VERBOSE__
   printf("%s %d %d\n", __func__, __LINE__, ret);
+#endif
   if (ret) {
     printf("error %d\n", ret);
   }
@@ -92,12 +94,16 @@ int sched_yield() {
 int pthread_cond_init(pthread_cond_t *cond,
 		      const pthread_condattr_t *attr) {
   ABT_cond *abt_cond = (ABT_cond *)malloc(sizeof(ABT_cond));
+#if __PTHREAD_VERBOSE__
   printf("%s %d\n", __func__, __LINE__);
+#endif
   int ret = ABT_cond_create(abt_cond);
   ABT_mutex_lock(cond_map_mutex);
   cond_map[cond] = abt_cond;
   ABT_mutex_unlock(cond_map_mutex);
+#if __PTHREAD_VERBOSE__
   printf("%s %d\n", __func__, __LINE__);
+#endif
   return ret;
 }
 
@@ -122,7 +128,9 @@ int pthread_cond_wait(pthread_cond_t *cond,
   auto it = cond_map.find(cond);
   if (it == cond_map.end())
     pthread_cond_init(cond, NULL);
+#if __PTHREAD_VERBOSE__
   printf("%s %d\n", __func__, __LINE__);
+#endif
   return ABT_cond_wait(*(cond_map[cond]), *(mutex_map[mutex]));
 #endif
 }
@@ -181,7 +189,9 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
   auto it = mutex_map.find(mutex);
   if (it == mutex_map.end())
     pthread_mutex_init(mutex, NULL);
+#if __PTHREAD_VERBOSE__
   printf("%s %d %p\n", __func__, __LINE__, mutex);
+#endif
   return ABT_mutex_lock(*(mutex_map[mutex]));
 #endif
 }
@@ -229,7 +239,9 @@ int pthread_key_create(pthread_key_t *key, void (*destructor)(void*)) {
 }
 
 int pthread_setspecific(pthread_key_t key, const void *value) {
+#if __PTHREAD_VERBOSE__
   printf("%s %d %p\n", __func__, __LINE__, key);
+#endif
   return ABT_key_set(*(key_map[key]), value);
 }
 

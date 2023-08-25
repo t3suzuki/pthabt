@@ -3,10 +3,17 @@
 
 extern "C" {
 void
-__debug_print(int a)
+__debug_print(int id, int a, int tid)
 {
   //sleep(1);
-  printf("debug %d\n", a);
+  switch (id) {
+  case 1:
+    printf("req_helper %d @ tid %d\n", a, tid);
+    break;
+  case 2:
+    printf("helper done %d @ tid %d\n", a, tid);
+    break;
+  }
 }
 
 }
