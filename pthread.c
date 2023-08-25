@@ -18,10 +18,12 @@
 #include <map>
 #include <set>
 #include "common.h"
+#include "real_pthread.h"
 
 #define MAX_CORE (1)
 #define MAX_TH (1024)
 
+//#define __PTHREAD_VERBOSE__ (1)
 
 int n_abt_thread = 0;
 ABT_xstream abt_xstreams[MAX_CORE];
@@ -38,7 +40,13 @@ static std::map<pthread_key_t, ABT_key *> key_map;
 //tbb::concurrent_hash_map<pthread_key_t *, ABT_key *> key_map;
 
 
+#define NEW_ABT_INIT (0)
 
+static void
+my_abt_init()
+{
+  ABT_init(0, NULL);
+}
 
 __attribute__((constructor(0xffff))) static void
 //static void
@@ -46,7 +54,13 @@ ensure_abt_initialized()
 {
   if (ABT_initialized() == ABT_ERR_UNINITIALIZED) {
     int ret;
+    pthread_t pth;
+#if NEW_ABT_INIT
+    real_pthread_create(&pth, NULL, my_abt_init, NULL);
+    real_pthread_join(pth, NULL);
+#else
     ret = ABT_init(0, NULL);
+#endif
     for (int i=0; i<MAX_CORE; i++) {
       ret = ABT_xstream_create(ABT_SCHED_NULL, &abt_xstreams[i]);
       ret = ABT_xstream_get_main_pools(abt_xstreams[i], 1, &abt_pools[i]);
@@ -73,11 +87,24 @@ int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
   return ret;
 }
 
+#define NEW_JOIN (1)
+
+void
+my_join(void *abt_th)
+{
+  ABT_thread_join(*(ABT_thread *)abt_th);
+}
+
 int pthread_join(pthread_t pth, void **retval) {
   assert(retval == NULL);
-  int ret = ABT_thread_join(abt_threads[pth]);
-  assert(ret == 0);
-  return ret;
+#if NEW_JOIN
+  pthread_t pth_for_join;
+  real_pthread_create(&pth_for_join, NULL, my_join, &abt_threads[pth]);
+  real_pthread_join(pth_for_join, NULL);
+#else
+  ABT_thread_join(abt_threads[pth]);
+#endif
+  return 0;
 }
 
 #if 0
@@ -493,8 +520,7 @@ long syscall_hook(int64_t rdi, int64_t rsi,
 		}
 	}
 
-    return hook_fn(rax_on_stack, rdi, rsi, rdx, r10_on_stack, r8, r9);
-    //return hook_fn(rax_on_stack, rdi, rsi, rdx, r10_on_stack, r8, ret2);
+	return hook_fn(rax_on_stack, rdi, rsi, rdx, r10_on_stack, r8, r9);
 }
 
 struct disassembly_state {
