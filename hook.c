@@ -3,7 +3,6 @@
 #include <unistd.h>
 #include <abt.h>
 #include <stack>
-#include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -15,13 +14,8 @@
 #include <dis-asm.h>
 #include <sched.h>
 #include <dlfcn.h>
-#include <pthread.h>
-#include <abt.h>
 #include <map>
 #include <set>
-#include <cassert>
-#include <dlfcn.h>
-#include <stdlib.h>
 
 #include "common.h"
 #include "real_pthread.h"
@@ -49,7 +43,6 @@ static void load_libmy(void)
 	    fprintf(stderr, "NOTE: this may occur when the compilation of your hook function library misses some specifications in LDFLAGS. or if you are using a C++ compiler, dlmopen may fail to find a symbol, and adding 'extern \"C\"' to the definition may resolve the issue.\n");
 	    exit(1);
 	  }
-	  printf("ok!\n");
 	}
 	{
 	  debug_print = dlsym(handle, "__debug_print");
@@ -81,7 +74,6 @@ static syscall_fn_t next_sys_call = NULL;
     helpers[id].arg[4] = a5;
     helpers[id].arg[5] = a6;
     helpers[id].arg[6] = a7;
-    //printf("%d %d\n", id, a1);
     real_pthread_mutex_lock(&helpers[id].mutex);
     helpers[id].ready = true;
     real_pthread_cond_signal(&helpers[id].cond);
@@ -96,11 +88,7 @@ static syscall_fn_t next_sys_call = NULL;
       }
       h->ready = false;
       real_pthread_mutex_unlock(&h->mutex);
-#if 1
       h->ret = next_sys_call(h->arg[0], h->arg[1], h->arg[2], h->arg[3], h->arg[4], h->arg[5], h->arg[6]);
-#else
-      printf("id=%d, syscall=%d\n", h->id, h->arg[0]);
-#endif
       h->done = true;
     }
   }
@@ -110,10 +98,6 @@ static long hook_function(long a1, long a2, long a3,
 			  long a4, long a5, long a6,
 			  long a7)
 {
-  
-  //printf("output from hook_function: syscall number %ld\n", a1);
-  //return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-  
   uint64_t abt_id;
   int ret = ABT_self_get_thread_id(&abt_id);
   if (ret == ABT_SUCCESS && (abt_id > 0)) {
@@ -130,7 +114,6 @@ static long hook_function(long a1, long a2, long a3,
 	  break;
 	ABT_thread_yield();
       }
-      //printf("[main] syscall done! %d\n", abt_id);
       return helpers[abt_id].ret;
     }
   } else {
@@ -143,10 +126,6 @@ static long hook_function(long a1, long a2, long a3,
 int __hook_init(long placeholder __attribute__((unused)),
 		void *sys_call_hook_ptr)
 {
-  /* real_pthread_create(&pth, NULL,  syscall_helper, NULL); */
-  /* sleep(1); */
-  /* printf("output from __hook_init: we can do some init work here\n"); */
-
   load_libmy();
   
   int i;

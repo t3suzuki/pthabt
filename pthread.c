@@ -17,11 +17,7 @@
 #include <abt.h>
 #include <map>
 #include <set>
-#include <cassert>
-#include <dlfcn.h>
-#include <stdlib.h>
 #include "common.h"
-//#include "tbb/concurrent_hash_map.h"
 
 #define MAX_CORE (1)
 #define MAX_TH (1024)
@@ -62,7 +58,6 @@ ensure_abt_initialized()
 
 int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
 		   void *(*start_routine) (void *), void *arg) {
-  //ensure_abt_initialized();
   int tid = n_abt_thread++;
   *pth = tid;
   
@@ -786,6 +781,5 @@ __attribute__((constructor(0xffff))) static void __zpoline_init(void)
 	setup_trampoline();
 	rewrite_code();
 	load_hook_lib();
-	//	ensure_abt_initialized();
 }
 }
