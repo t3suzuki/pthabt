@@ -61,7 +61,7 @@ static syscall_fn_t next_sys_call = NULL;
     bool done;
     bool ready;
     long arg[7];
-    int ret;
+    long ret;
   } ScHelper;
   ScHelper helpers[N_HELPER];
   
@@ -115,7 +115,6 @@ long hook_function(long a1, long a2, long a3,
       ABT_thread_yield();
     } else if ((a1 == 202) || // futex
 	       (a1 == 1) ||   // write
-	       (a1 == 9) ||   // mmap
 	       (a1 == 232)) {  // epoll
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else {
