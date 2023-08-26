@@ -20,7 +20,7 @@
 #include "common.h"
 #include "real_pthread.h"
 
-#define N_HELPER (128)
+#define N_HELPER (16)
 
 
 extern "C" {
@@ -88,32 +88,49 @@ static syscall_fn_t next_sys_call = NULL;
       }
       h->ready = false;
       real_pthread_mutex_unlock(&h->mutex);
+      if (debug_print) {
+	debug_print(5, h->arg[0], h->arg[2]);
+	debug_print(5, h->arg[0], h->arg[3]);
+      }
       h->ret = next_sys_call(h->arg[0], h->arg[1], h->arg[2], h->arg[3], h->arg[4], h->arg[5], h->arg[6]);
       h->done = true;
     }
   }
   
 
-static long hook_function(long a1, long a2, long a3,
+long hook_function(long a1, long a2, long a3,
 			  long a4, long a5, long a6,
 			  long a7)
 {
   uint64_t abt_id;
   int ret = ABT_self_get_thread_id(&abt_id);
+  if (debug_print)
+    debug_print(1, a1, abt_id);
+  if (a1 == 232) {
+    debug_print(6, a2, abt_id);
+    debug_print(6, a4, abt_id);
+  }
   if (ret == ABT_SUCCESS && (abt_id > 0)) {
     if (a1 == 24) { // sched_yield
       ABT_thread_yield();
     } else if ((a1 == 202) || // futex
+	       (a1 == 1) ||   // write
 	       (a1 == 9) ||   // mmap
-	       (a1 == 10)) {   // mprotect
+	       (a1 == 232)) {  // epoll
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else {
-      if (debug_print)
-	debug_print(1, a1, abt_id);
       req_helper(abt_id, a1, a2, a3, a4, a5, a6, a7);
       while (1) {
 	if (helpers[abt_id].done)
 	  break;
+	
+	uint64_t abt_id;
+	int ret = ABT_self_get_thread_id(&abt_id);
+	if (ret != ABT_SUCCESS) {
+	  abt_id = 9999;
+	}
+	if (debug_print)
+	  debug_print(3, -1, abt_id);
 	ABT_thread_yield();
       }
       if (debug_print)
@@ -138,6 +155,7 @@ int __hook_init(long placeholder __attribute__((unused)),
     real_pthread_mutex_init(&helpers[i].mutex, NULL);
     real_pthread_cond_init(&helpers[i].cond, NULL);
     real_pthread_create(&helpers[i].pth, NULL,  do_helper, &helpers[i]);
+    real_pthread_setname_np(&helpers[i].pth, "do_helper");
   }
 
   sleep(1);
