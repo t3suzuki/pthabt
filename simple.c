@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <pthread.h>
 #include <abt.h>
 
@@ -28,8 +29,38 @@ int pthread_join(pthread_t pth, void **retval) {
   return 0;
 }
 
+
+int pthread_mutex_init(pthread_mutex_t *mutex,
+		       const pthread_mutexattr_t *attr) {
+  ABT_mutex *abt_mutex = (ABT_mutex *)malloc(sizeof(ABT_mutex));
+  int ret = ABT_mutex_create(abt_mutex);
+  *(ABT_mutex **)mutex = abt_mutex;
+  return ret;
+}
+
+int pthread_mutex_lock(pthread_mutex_t *mutex) {
+  ABT_mutex *abt_mutex = *(ABT_mutex **)mutex;
+  return ABT_mutex_lock(*abt_mutex);
+}
+
+int pthread_mutex_trylock(pthread_mutex_t *mutex) {
+  ABT_mutex *abt_mutex = *(ABT_mutex **)mutex;
+  return ABT_mutex_trylock(*abt_mutex);
+}
+
+int pthread_mutex_unlock(pthread_mutex_t *mutex) {
+  ABT_mutex *abt_mutex = *(ABT_mutex **)mutex;
+  return ABT_mutex_unlock(*abt_mutex);
+}
+
+int pthread_mutex_destroy(pthread_mutex_t *mutex) {
+  ABT_mutex *abt_mutex = *(ABT_mutex **)mutex;
+  return ABT_mutex_free(abt_mutex);
+}
+
+
 __attribute__((constructor(0xffff))) static void
-my_init()
+mylib_init()
 {
   int i;
   printf(".so argobots!\n");
@@ -42,3 +73,10 @@ my_init()
     ABT_xstream_get_main_pools(abt_xstreams[i], 1, &global_abt_pools[i]);
   }
 }
+
+
+
+
+
+
+
