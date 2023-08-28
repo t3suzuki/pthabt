@@ -1,8 +1,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include "real_pthread.h"
 #include <abt.h>
+#include "real_pthread.h"
 
 #define N_HELPER (32)
 
@@ -18,13 +18,13 @@ typedef struct {
   pthread_mutex_t mutex;
   pthread_cond_t cond;
   volatile int done;
-  int ready;
-  long arg[7];
-  long ret;
+  volatile int ready;
+  volatile long arg[7];
+  volatile long ret;
 } helper_t;
-helper_t helpers[N_HELPER];
+static helper_t helpers[N_HELPER];
 
-inline void req_helper(int id, long a1, long a2, long a3, long a4, long a5, long a6, long a7) {
+inline static void req_helper(int id, long a1, long a2, long a3, long a4, long a5, long a6, long a7) {
   helpers[id].done = false;
   helpers[id].arg[0] = a1;
   helpers[id].arg[1] = a2;
@@ -58,17 +58,28 @@ long hook_function(long a1, long a2, long a3,
 		   long a4, long a5, long a6,
 		   long a7)
 {
+  if (debug_print) {
+    debug_print(1, a1, 9999);
+  }
   uint64_t abt_id;
   int ret = ABT_self_get_thread_id(&abt_id);
-  if (ret == ABT_SUCCESS && (abt_id > 0)) {
+  if (ret == ABT_SUCCESS && (abt_id >= 0)) {
+    if (debug_print) {
+      debug_print(1, a1, abt_id);
+    }
     if ((a1 == 1) || // write
-	(a1 == 202)) { // futex
+	(a1 == 202) || // futex
+	false) {
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else {
       req_helper(abt_id, a1, a2, a3, a4, a5, a6, a7);
       while (1) {
 	if (helpers[abt_id].done)
 	  break;
+	ABT_thread_yield();
+      }
+      if (debug_print) {
+	debug_print(2, a1, ret);
       }
       return helpers[abt_id].ret;
     }
