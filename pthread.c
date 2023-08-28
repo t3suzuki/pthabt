@@ -17,21 +17,30 @@
 #include <abt.h>
 #include <map>
 #include <set>
+#include <stack>
 #include "common.h"
 #include "real_pthread.h"
 
-#define MAX_CORE (1)
+#define MAX_CORE (4)
 #define MAX_TH (1024)
 
 //#define __PTHREAD_VERBOSE__ (1)
 
 int n_abt_thread = 0;
 ABT_xstream abt_xstreams[MAX_CORE];
-ABT_thread abt_threads[MAX_TH];
+//ABT_thread abt_threads[MAX_TH];
 ABT_pool abt_pools[MAX_CORE];
 ABT_mutex mutex_map_mutex;
 ABT_mutex cond_map_mutex;
 
+typedef int tid_t;
+typedef struct {
+  ABT_thread abt_thread;
+  tid_t tid;
+} myth_t;
+
+static std::map<tid_t, myth_t *> th_map;
+static std::stack<myth_t *> myth_pool;
 static std::map<pthread_cond_t *, ABT_cond *> cond_map;
 static std::map<pthread_mutex_t *, ABT_mutex *> mutex_map;
 static std::map<pthread_key_t, ABT_key *> key_map;
@@ -72,13 +81,22 @@ ensure_abt_initialized()
 
 int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
 		   void *(*start_routine) (void *), void *arg) {
-  int tid = n_abt_thread++;
-  *pth = tid;
-  
-  int ret = ABT_thread_create(abt_pools[tid % MAX_CORE], start_routine, arg,
-			      ABT_THREAD_ATTR_NULL, &abt_threads[tid]);
+
+  myth_t *myth;
+  if (myth_pool.empty()) {
+    myth = (myth_t *)malloc(sizeof(myth_t));
+    myth->tid = n_abt_thread++;
+  } else {
+    myth = myth_pool.top();
+    myth_pool.pop();
+  }
+  int ret = ABT_thread_create(abt_pools[myth->tid % MAX_CORE], start_routine, arg,
+			      ABT_THREAD_ATTR_NULL, &myth->abt_thread);
+  *(tid_t *)pth = myth->tid;
+  th_map[myth->tid] = myth;
+  //printf("%p %p %p\n", pth, myth, &myth->abt_thread);
 #if __PTHREAD_VERBOSE__
-  printf("%s %d %d\n", __func__, __LINE__, ret);
+  printf("%s %d %d %p\n", __func__, __LINE__, ret, arg);
 #endif
   if (ret) {
     printf("error %d\n", ret);
@@ -90,16 +108,20 @@ int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
 #define NEW_JOIN (1)
 
 void
-my_join(void *abt_th)
+my_join(void *arg)
 {
-  ABT_thread_join(*(ABT_thread *)abt_th);
+  myth_t *myth = (myth_t *)arg;
+  ABT_thread_join(myth->abt_thread);
+  myth_pool.push(myth);
 }
 
 int pthread_join(pthread_t pth, void **retval) {
   assert(retval == NULL);
 #if NEW_JOIN
   pthread_t pth_for_join;
-  real_pthread_create(&pth_for_join, NULL, my_join, &abt_threads[pth]);
+  tid_t tid = (tid_t)pth;
+  //printf("%p %p %p\n", &pth, th_map[pth], &(th_map[pth]->abt_thread));
+  real_pthread_create(&pth_for_join, NULL, my_join, th_map[tid]);
   real_pthread_join(pth_for_join, NULL);
 #else
   ABT_thread_join(abt_threads[pth]);
@@ -107,11 +129,11 @@ int pthread_join(pthread_t pth, void **retval) {
   return 0;
 }
 
-#if 0
+#if 1
 int sched_yield() {
   uint64_t id;
   int ret2 = ABT_self_get_thread_id(&id);
-  printf("%s %d %lu %d\n", __func__, __LINE__, id, ret2);
+  //printf("%s %d %lu %d\n", __func__, __LINE__, id, ret2);
   
   return ABT_thread_yield();
 }
@@ -215,8 +237,8 @@ int pthread_mutex_lock(pthread_mutex_t *mutex) {
 #else
   auto it = mutex_map.find(mutex);
   if (it == mutex_map.end())
-    pthread_mutex_init(mutex, NULL);
-#if __PTHREAD_VERBOSE__
+    return pthread_mutex_init(mutex, NULL);
+#if 1//__PTHREAD_VERBOSE__
   printf("%s %d %p\n", __func__, __LINE__, mutex);
 #endif
   return ABT_mutex_lock(*(mutex_map[mutex]));
@@ -296,7 +318,7 @@ int pthread_setname_np(pthread_t thread, const char *name) {
 
 
 
-#define SUPPLEMENTAL__REWRITTEN_ADDR_CHECK 1
+//#define SUPPLEMENTAL__REWRITTEN_ADDR_CHECK 1
 
 #ifdef SUPPLEMENTAL__REWRITTEN_ADDR_CHECK
 
@@ -492,6 +514,7 @@ static long (*hook_fn)(int64_t a1, int64_t a2, int64_t a3,
 		       int64_t a4, int64_t a5, int64_t a6,
 		       int64_t a7) = enter_syscall;
 
+extern void (*debug_print)(int, int, int);
 long syscall_hook(int64_t rdi, int64_t rsi,
 		  int64_t rdx, int64_t __rcx __attribute__((unused)),
 		  int64_t r8, int64_t r9,
