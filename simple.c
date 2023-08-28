@@ -2,13 +2,15 @@
 #include <pthread.h>
 #include <abt.h>
 
-#define N_TH (4)
+#define N_TH (8)
 #define ULT_N_TH (4*N_TH)
 
 static ABT_xstream abt_xstreams[N_TH];
 static ABT_thread abt_threads[ULT_N_TH];
 static ABT_pool global_abt_pools[N_TH];
 static unsigned int global_abt_tid = 0;
+
+//#define __PTHREAD_VERBOSE__ (1)
 
 
 int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
@@ -39,25 +41,84 @@ int pthread_mutex_init(pthread_mutex_t *mutex,
 }
 
 int pthread_mutex_lock(pthread_mutex_t *mutex) {
+#if __PTHREAD_VERBOSE__
+  printf("%s %d\n", __func__, __LINE__);
+#endif
   ABT_mutex *abt_mutex = *(ABT_mutex **)mutex;
   return ABT_mutex_lock(*abt_mutex);
 }
 
 int pthread_mutex_trylock(pthread_mutex_t *mutex) {
+#if __PTHREAD_VERBOSE__
+  printf("%s %d\n", __func__, __LINE__);
+#endif
   ABT_mutex *abt_mutex = *(ABT_mutex **)mutex;
   return ABT_mutex_trylock(*abt_mutex);
 }
 
 int pthread_mutex_unlock(pthread_mutex_t *mutex) {
+#if __PTHREAD_VERBOSE__
+  printf("%s %d\n", __func__, __LINE__);
+#endif
   ABT_mutex *abt_mutex = *(ABT_mutex **)mutex;
   return ABT_mutex_unlock(*abt_mutex);
 }
 
 int pthread_mutex_destroy(pthread_mutex_t *mutex) {
+#if __PTHREAD_VERBOSE__
+  printf("%s %d\n", __func__, __LINE__);
+#endif
   ABT_mutex *abt_mutex = *(ABT_mutex **)mutex;
   return ABT_mutex_free(abt_mutex);
 }
 
+int pthread_cond_signal(pthread_cond_t *cond) {
+#if __PTHREAD_VERBOSE__
+  printf("%s %d\n", __func__, __LINE__);
+#endif
+  ABT_cond *abt_cond = *(ABT_cond **)cond;
+  return ABT_cond_signal(*abt_cond);
+}
+
+int pthread_cond_destroy(pthread_cond_t *cond) {
+#if __PTHREAD_VERBOSE__
+  printf("%s %d\n", __func__, __LINE__);
+#endif
+  ABT_cond *abt_cond = *(ABT_cond **)cond;
+  return ABT_cond_free(abt_cond);
+}
+
+int pthread_cond_wait(pthread_cond_t *cond,
+		      pthread_mutex_t *mutex) {
+#if __PTHREAD_VERBOSE__
+  printf("%s %d\n", __func__, __LINE__);
+#endif
+  ABT_cond *abt_cond = *(ABT_cond **)cond;
+  ABT_mutex *abt_mutex = *(ABT_mutex **)mutex;
+  return ABT_cond_wait(*abt_cond, *abt_mutex);
+}
+
+int pthread_cond_timedwait(pthread_cond_t *cond,
+			   pthread_mutex_t *mutex,
+			   const struct timespec *abstime) {
+#if __PTHREAD_VERBOSE__
+  printf("%s %d\n", __func__, __LINE__);
+#endif
+  ABT_cond *abt_cond = *(ABT_cond **)cond;
+  ABT_mutex *abt_mutex = *(ABT_mutex **)mutex;
+  return ABT_cond_timedwait(*abt_cond, *abt_mutex, abstime);
+}
+
+int pthread_cond_init(pthread_cond_t *cond,
+		      const pthread_condattr_t *attr) {
+#if __PTHREAD_VERBOSE__
+  printf("%s %d\n", __func__, __LINE__);
+#endif
+  ABT_cond *abt_cond = (ABT_cond *)malloc(sizeof(ABT_cond));
+  int ret = ABT_cond_create(abt_cond);
+  *(ABT_cond **)cond = abt_cond;
+  return ret;
+}
 
 __attribute__((constructor(0xffff))) static void
 mylib_init()
