@@ -2,7 +2,7 @@
 #include <pthread.h>
 #include <abt.h>
 
-#define N_TH (8)
+#define N_TH (4)
 #define ULT_N_TH (4*N_TH)
 
 static ABT_xstream abt_xstreams[N_TH];
