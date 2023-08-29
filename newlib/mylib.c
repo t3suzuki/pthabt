@@ -12,21 +12,26 @@
 static ABT_xstream abt_xstreams[N_TH];
 static ABT_thread abt_threads[ULT_N_TH];
 static ABT_pool global_abt_pools[N_TH];
-static unsigned int global_abt_tid = 0;
+static unsigned int global_my_tid = 0;
 
 //#define __PTHREAD_VERBOSE__ (1)
 
 
 int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
 		   void *(*start_routine) (void *), void *arg) {
-  int abt_tid = global_abt_tid++;
+  printf("%s %d\n", __func__, __LINE__);
+  int my_tid = global_my_tid++;
+  printf("%s %d\n", __func__, __LINE__);
   ABT_thread *abt_thread = (ABT_thread *)malloc(sizeof(ABT_thread));
-  printf("%s %d %d @ core %d\n", __func__, __LINE__, abt_tid, abt_tid % N_TH);
-  int ret = ABT_thread_create(global_abt_pools[abt_tid % N_TH],
+  printf("%s %d\n", __func__, __LINE__);
+  int ret = ABT_thread_create(global_abt_pools[my_tid % N_TH],
 			      (void (*)(void*))start_routine,
 			      arg,
 			      ABT_THREAD_ATTR_NULL,
 			      abt_thread);
+  unsigned long long abt_id;
+  ABT_thread_get_id(*abt_thread, (ABT_unit_id *)&abt_id);
+  printf("%s %d ABT_id %llu @ core %d\n", __func__, __LINE__, abt_id, my_tid % N_TH);
   *pth = (pthread_t)abt_thread;
   return 0;
 }
@@ -198,6 +203,7 @@ mylib_init()
   }
 #endif
   for (i=0; i<N_TH; i++) {
+    ABT_xstream_set_cpubind(abt_xstreams[i], i);
     ABT_xstream_get_main_pools(abt_xstreams[i], 1, &global_abt_pools[i]);
   }
 
