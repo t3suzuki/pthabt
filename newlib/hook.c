@@ -49,8 +49,8 @@ void do_helper(void *arg) {
     h->ready = false;
     real_pthread_mutex_unlock(&h->mutex);
     h->ret = next_sys_call(h->arg[0], h->arg[1], h->arg[2], h->arg[3], h->arg[4], h->arg[5], h->arg[6]);
-    if (debug_print)
-      debug_print(8, h->arg[0], h->ret);
+    //if (debug_print)
+    //debug_print(8, h->arg[0], h->ret);
     h->done = true;
   }
 }
@@ -80,20 +80,25 @@ long hook_function(long a1, long a2, long a3,
 	false) {
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else {
+      /*
       if (debug_print) {
 	debug_print(1, a1, abt_id);
       }
+      */
       req_helper(abt_id, a1, a2, a3, a4, a5, a6, a7);
       while (1) {
 	if (helpers[abt_id].done)
 	  break;
+	/*
 	if (debug_print) {
 	  if (abt_id % 4 == 1)
 	    debug_print(77, a1, abt_id);
 	}
+	*/
 	ABT_thread_yield();
 	//uint64_t pre_id;
 	//int ret = ABT_self_get_pre_id(&pre_id);
+	/*
 	{
 	  if (debug_print) {
 	    if (abt_id % 4 == 1) {
@@ -102,11 +107,14 @@ long hook_function(long a1, long a2, long a3,
 	    }
 	  }
 	}
+	*/
       }
+      /*
       if (debug_print) {
 	debug_print(2, a1, ret);
 	debug_print(2, a1, abt_id);
       }
+      */
       return helpers[abt_id].ret;
     }
   } else {
