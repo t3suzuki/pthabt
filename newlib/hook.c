@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <time.h>
 #include <abt.h>
 #include "real_pthread.h"
 
@@ -68,12 +69,63 @@ long hook_function(long a1, long a2, long a3,
   uint64_t abt_id;
   int ret = ABT_self_get_thread_id(&abt_id);
   if (ret == ABT_SUCCESS && (abt_id >= 0)) {
+
     /*
     if (debug_print) {
-      debug_print(1, a1, abt_id);
+      if (a1 != 441)
+	debug_print(1, a1, abt_id);
     }
     */
-    if ((a1 == 1) || // write
+
+    if (a1 == 441) {
+      /*
+      if (debug_print) {
+	debug_print(1, a1, abt_id);
+      }
+      */
+      struct timespec tsz = {.tv_sec = 0, .tv_nsec = 0};
+      struct timespec *ts = (struct timespec *) a5;
+      if (ts) {
+	struct timespec tsc;
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &tsc);
+	ts->tv_sec += tsc.tv_sec;
+	ts->tv_nsec += tsc.tv_nsec;
+	/*
+	if (debug_print) {
+	  debug_print(888, ts1->tv_sec, ts1->tv_nsec);
+	}
+	*/
+      }
+      while (1) {
+	/*
+	if (debug_print) {
+	  debug_print(5, abt_id, a5);
+	}
+	*/
+	int ret = next_sys_call(a1, a2, a3, a4, (long)&tsz, a6, a7);
+	/*
+	if (debug_print) {
+	  debug_print(6, abt_id, ret);
+	}
+	*/
+	if (ret > 0) {
+	  return ret;
+	}
+	if (ts) {
+	  struct timespec ts2;
+	  clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
+	  /*
+	  if (debug_print) {
+	    debug_print(889, ts2.tv_sec, ts2.tv_nsec);
+	  }
+	  */
+	  double diff_nsec = (ts2.tv_sec - ts->tv_sec) * 1e9 + (ts2.tv_nsec - ts->tv_nsec);
+	  if (diff_nsec > 0)
+	    return 0;
+	}
+	ABT_thread_yield();
+      }
+    } else if ((a1 == 1) || // write
 	(a1 == 9) || // mmap
 	(a1 == 12) || // brk
 	(a1 == 202) || // futex
@@ -111,8 +163,8 @@ long hook_function(long a1, long a2, long a3,
       }
       /*
       if (debug_print) {
-	debug_print(2, a1, ret);
-	debug_print(2, a1, abt_id);
+	debug_print(2, a1, helpers[abt_id].ret);
+	//debug_print(2, a1, abt_id);
       }
       */
       return helpers[abt_id].ret;
