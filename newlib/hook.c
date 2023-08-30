@@ -76,8 +76,24 @@ long hook_function(long a1, long a2, long a3,
 	debug_print(1, a1, abt_id);
     }
     */
-
-    if (a1 == 441) {
+    if (a1 == 230) {
+      if (a3 == 0) {
+	struct timespec *ts = (struct timespec *) a4;
+	struct timespec tsc;
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &tsc);
+	ts->tv_sec += tsc.tv_sec;
+	ts->tv_nsec += tsc.tv_nsec;
+	while (1) {
+	  struct timespec ts2;
+	  clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
+	  double diff_nsec = (ts2.tv_sec - ts->tv_sec) * 1e9 + (ts2.tv_nsec - ts->tv_nsec);
+	  if (diff_nsec > 0)
+	    return 0;
+	  ABT_thread_yield();
+	}
+      }
+    }
+    else if (a1 == 441) {
       /*
       if (debug_print) {
 	debug_print(1, a1, abt_id);
@@ -129,6 +145,7 @@ long hook_function(long a1, long a2, long a3,
 	(a1 == 9) || // mmap
 	(a1 == 12) || // brk
 	(a1 == 202) || // futex
+	       true ||
 	false) {
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else {
