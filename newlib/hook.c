@@ -207,8 +207,6 @@ int __hook_init(long placeholder __attribute__((unused)),
     real_pthread_create(&helpers[i].pth, NULL, (void *(*)(void *))do_helper, &helpers[i]);
   }
 
-  sleep(1);
-  
   next_sys_call = *((syscall_fn_t *) sys_call_hook_ptr);
   *((syscall_fn_t *) sys_call_hook_ptr) = hook_function;
   return 0;

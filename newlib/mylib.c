@@ -16,7 +16,6 @@ static unsigned int global_my_tid = 0;
 
 //#define __PTHREAD_VERBOSE__ (1)
 
-
 int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
 		   void *(*start_routine) (void *), void *arg) {
   int my_tid = global_my_tid++;
@@ -126,7 +125,7 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex) {
 int pthread_cond_init(pthread_cond_t *cond,
 		      const pthread_condattr_t *attr) {
 #if __PTHREAD_VERBOSE__
-  printf("%s %d\n", __func__, __LINE__);
+  printf("%s %d %p\n", __func__, __LINE__, cond);
 #endif
   abt_cond_wrap_t *abt_cond_wrap = (abt_cond_wrap_t *)malloc(sizeof(abt_cond_wrap_t));
   abt_cond_wrap->magic = 0xdeadbeef;
@@ -147,7 +146,7 @@ inline static ABT_cond *get_abt_cond(pthread_cond_t *cond)
 
 int pthread_cond_signal(pthread_cond_t *cond) {
 #if __PTHREAD_VERBOSE__
-  printf("%s %d\n", __func__, __LINE__);
+  printf("%s %d %p\n", __func__, __LINE__, cond);
 #endif
   ABT_cond *abt_cond = get_abt_cond(cond);
   return ABT_cond_signal(*abt_cond);
@@ -155,7 +154,7 @@ int pthread_cond_signal(pthread_cond_t *cond) {
 
 int pthread_cond_destroy(pthread_cond_t *cond) {
 #if __PTHREAD_VERBOSE__
-  printf("%s %d\n", __func__, __LINE__);
+  printf("%s %d %p\n", __func__, __LINE__, cond);
 #endif
   ABT_cond *abt_cond = get_abt_cond(cond);
   return ABT_cond_free(abt_cond);
@@ -182,6 +181,18 @@ int pthread_cond_timedwait(pthread_cond_t *cond,
   return ABT_cond_timedwait(*abt_cond, *abt_mutex, abstime);
 }
 
+pthread_t pthread_self(void)
+{
+  printf("OK? %s %d\n", __func__, __LINE__);
+  return real_pthread_self();
+}
+
+#if 1
+int sched_yield() {
+  return ABT_thread_yield();
+}
+#endif
+
 
 void __zpoline_init(void);
 
@@ -202,16 +213,12 @@ mylib_init()
   }
 #endif
   for (i=0; i<N_TH; i++) {
-    //ABT_xstream_set_cpubind(abt_xstreams[i], i);
+    ABT_xstream_set_cpubind(abt_xstreams[i], i);
     ABT_xstream_get_main_pools(abt_xstreams[i], 1, &global_abt_pools[i]);
   }
 
   __zpoline_init();
 }
-
-
-
-
 
 
 
