@@ -170,6 +170,15 @@ int pthread_cond_wait(pthread_cond_t *cond,
   return ABT_cond_wait(*abt_cond, *abt_mutex);
 }
 
+int pthread_cond_broadcast(pthread_cond_t *cond)
+{
+#if __PTHREAD_VERBOSE__
+  printf("%s %d\n", __func__, __LINE__);
+#endif
+  ABT_cond *abt_cond = get_abt_cond(cond);
+  return ABT_cond_broadcast(*abt_cond);
+}
+
 int pthread_cond_timedwait(pthread_cond_t *cond,
 			   pthread_mutex_t *mutex,
 			   const struct timespec *abstime) {
@@ -179,6 +188,13 @@ int pthread_cond_timedwait(pthread_cond_t *cond,
   ABT_cond *abt_cond = get_abt_cond(cond);
   ABT_mutex *abt_mutex = get_abt_mutex(mutex);
   return ABT_cond_timedwait(*abt_cond, *abt_mutex, abstime);
+}
+
+int pthread_cond_clockwait(pthread_cond_t *cond,
+			   pthread_mutex_t *mutex,
+			   clockid_t clk,
+			   const struct timespec *abstime) {
+  pthread_cond_timedwait(cond, mutex, abstime);
 }
 
 
@@ -219,6 +235,45 @@ void * pthread_getspecific(pthread_key_t key) {
 
 int pthread_key_delete(pthread_key_t key) {
   return ABT_key_free(abt_keys[key]);
+}
+
+int pthread_rwlock_init(pthread_rwlock_t *rwlock,
+			const pthread_rwlockattr_t *attr) {
+  
+  ABT_rwlock *abt_rwlock = (ABT_rwlock *)malloc(sizeof(ABT_rwlock));
+  ABT_rwlock_create(abt_rwlock);
+  *(ABT_rwlock **)rwlock = abt_rwlock;
+  return 0;
+}
+
+inline static ABT_rwlock *get_abt_rwlock(pthread_rwlock_t *rwlock)
+{
+  ABT_rwlock *abt_rwlock = *(ABT_rwlock **)rwlock;
+  return abt_rwlock;
+}
+
+int pthread_rwlock_rdlock(pthread_rwlock_t *rwlock)
+{
+  ABT_rwlock *abt_rwlock = get_abt_rwlock(rwlock);
+  return ABT_rwlock_rdlock(*abt_rwlock);
+}
+
+int pthread_rwlock_wrlock(pthread_rwlock_t *rwlock)
+{
+  ABT_rwlock *abt_rwlock = get_abt_rwlock(rwlock);
+  return ABT_rwlock_wrlock(*abt_rwlock);
+}
+
+int pthread_rwlock_unlock(pthread_rwlock_t *rwlock)
+{
+  ABT_rwlock *abt_rwlock = get_abt_rwlock(rwlock);
+  return ABT_rwlock_unlock(*abt_rwlock);
+}
+
+int pthread_rwlock_destory(pthread_rwlock_t *rwlock)
+{
+  ABT_rwlock *abt_rwlock = get_abt_rwlock(rwlock);
+  return ABT_rwlock_free(abt_rwlock);
 }
 
 #if 0
