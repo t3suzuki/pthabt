@@ -181,11 +181,53 @@ int pthread_cond_timedwait(pthread_cond_t *cond,
   return ABT_cond_timedwait(*abt_cond, *abt_mutex, abstime);
 }
 
+
+#define N_KEY (1024)
+ABT_key *abt_keys[N_KEY];
+
+int pthread_key_create(pthread_key_t *key, void (*destructor)(void*)) {
+#if __PTHREAD_VERBOSE__
+  printf("%s %d %p %p\n", __func__, __LINE__, key);
+#endif
+  int i_key;
+  for (i_key=0; i_key<N_KEY; i_key++) {
+    if (abt_keys[i_key] == 0) {
+      break;
+    }
+  }
+  abt_keys[i_key] = (ABT_key *)malloc(sizeof(ABT_key));
+  int ret = ABT_key_create(destructor, abt_keys[i_key]);
+  *key = i_key;
+  return ret;
+}
+
+int pthread_setspecific(pthread_key_t key, const void *value) {
+#if __PTHREAD_VERBOSE__
+  printf("%s %d key=%d\n", __func__, __LINE__, key);
+#endif
+  return ABT_self_set_specific(*(abt_keys[key]), (void *)value);
+}
+
+void * pthread_getspecific(pthread_key_t key) {
+#if __PTHREAD_VERBOSE__
+  printf("%s %d %p\n", __func__, __LINE__, key);
+#endif
+  void *ret;
+  ABT_self_get_specific(*(abt_keys[key]), &ret);
+  return ret;
+}
+
+int pthread_key_delete(pthread_key_t key) {
+  return ABT_key_free(abt_keys[key]);
+}
+
+#if 0
 pthread_t pthread_self(void)
 {
   printf("OK? %s %d\n", __func__, __LINE__);
   return real_pthread_self();
 }
+#endif
 
 #if 1
 int sched_yield() {
@@ -217,6 +259,8 @@ mylib_init()
     ABT_xstream_get_main_pools(abt_xstreams[i], 1, &global_abt_pools[i]);
   }
 
+  sleep(1);
+  
   __zpoline_init();
 }
 
