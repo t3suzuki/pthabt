@@ -4,8 +4,8 @@
 #include "real_pthread.h"
 
 
-#define N_TH (4)
-#define ULT_N_TH (4*N_TH)
+#define N_TH (1)
+#define ULT_N_TH (32*N_TH)
 
 //#define NEW_JOIN (1)
 
@@ -330,7 +330,7 @@ mylib_init()
     ABT_xstream_get_main_pools(abt_xstreams[i], 1, &global_abt_pools[i]);
   }
 
-  sleep(1);
+  //sleep(1);
   
   __zpoline_init();
 }
