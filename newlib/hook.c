@@ -70,12 +70,9 @@ long hook_function(long a1, long a2, long a3,
   int ret = ABT_self_get_thread_id(&abt_id);
   if (ret == ABT_SUCCESS && (abt_id >= 0)) {
 
-    /*
     if (debug_print) {
-      if (a1 != 441)
 	debug_print(1, a1, abt_id);
     }
-    */
     if (a1 == 230) {
       if (a3 == 0) {
 	struct timespec *ts = (struct timespec *) a4;
@@ -147,6 +144,7 @@ long hook_function(long a1, long a2, long a3,
 	(a1 == 202) || // futex
 	       true ||
 	false) {
+      //ABT_thread_yield();
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else {
       /*
