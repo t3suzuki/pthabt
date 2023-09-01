@@ -56,7 +56,7 @@ def patch(exe_text, loc):
         if pattern_insn:
             m = re.search(pattern_insn, line)
             if m:
-                print("   [Found instruction] " + line)
+                debug_print("   [Found instruction] " + line)
                 pattern_op = re.compile('mov\s+\(%(\w+)\),')
                 m = re.search(pattern_op, line)
                 if m:
