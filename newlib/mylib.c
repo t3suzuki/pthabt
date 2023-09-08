@@ -1,11 +1,13 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <abt.h>
+#include <errno.h>
 #include "real_pthread.h"
 
 
-#define N_TH (1)
-#define ULT_N_TH (32*N_TH)
+
+#define N_TH (4)
+#define ULT_N_TH (16*N_TH)
 
 //#define NEW_JOIN (1)
 
@@ -187,14 +189,22 @@ int pthread_cond_timedwait(pthread_cond_t *cond,
 #endif
   ABT_cond *abt_cond = get_abt_cond(cond);
   ABT_mutex *abt_mutex = get_abt_mutex(mutex);
-  return ABT_cond_timedwait(*abt_cond, *abt_mutex, abstime);
+  int ret = ABT_cond_timedwait(*abt_cond, *abt_mutex, abstime);
+  if (ret == ABT_ERR_COND_TIMEDOUT) {
+    return ETIMEDOUT;
+  } else {
+    return 0;
+  }
 }
 
 int pthread_cond_clockwait(pthread_cond_t *cond,
 			   pthread_mutex_t *mutex,
 			   clockid_t clk,
 			   const struct timespec *abstime) {
-  pthread_cond_timedwait(cond, mutex, abstime);
+#if 1
+  printf("%s %d\n", __func__, __LINE__);
+#endif
+  return pthread_cond_timedwait(cond, mutex, abstime);
 }
 
 
