@@ -65,9 +65,10 @@ init()
   }
 
   uint32_t csts;
+  uint32_t cc;
   csts = regs32[0x1c / sizeof(uint32_t)];
   printf("%lx\n", csts);
-  uint32_t cc = 0;
+  cc = 0;
   regs32[0x14 / sizeof(uint32_t)] = cc;
   sleep(1);
   csts = regs32[0x1c / sizeof(uint32_t)];
@@ -80,8 +81,16 @@ init()
 			   MAP_PRIVATE | MAP_HUGETLB | MAP_ANONYMOUS | MAP_POPULATE, 0, 0);
   bzero(admin_queue, sz);
 
-  regs64[0x30 / sizeof(uint64_t)] = v2p(admin_queue); // CQ
-  regs64[0x28 / sizeof(uint64_t)] = v2p(admin_queue + 0x1000); // SQ
+  regs64[0x30 / sizeof(uint64_t)] = v2p(admin_queue); // Admin CQ phyaddr
+  regs64[0x28 / sizeof(uint64_t)] = v2p(admin_queue + 0x1000); // Admin SQ phyaddr
+  regs32[0x24 / sizeof(uint32_t)] = (8 << 16) | 8; // Admin Queue Entry Num
+
+  cc = 1;
+  regs32[0x14 / sizeof(uint32_t)] = cc;
+  sleep(1);
+  csts = regs32[0x1c / sizeof(uint32_t)];
+  printf("%lx\n", csts);
+  assert(csts == 1);
 
   
 }
