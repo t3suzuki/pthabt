@@ -98,24 +98,24 @@ static uint32_t cqp = 0;
 static volatile void *buf;
 
 void
-sync_cmd(int *sqp, int *cqp)
+sync_cmd(int *sqpp, int *cqpp)
 {
-  *sqp = (*sqp + 1) % ASQD;
-  regs32[0x1000 / sizeof(uint32_t)] = *sqp;
+  *sqpp = (*sqpp + 1) % ASQD;
+  regs32[0x1000 / sizeof(uint32_t)] = *sqpp;
   
   while (1) {
-    if (acq[*cqp].SF.P)
+    if (acq[*cqpp].SF.P)
       break;
     sleep(1);
   }
-  *cqp = (*cqp + 1) % ACQD;
+  *cqpp = (*cqpp + 1) % ACQD;
   printf("cmd done\n");
 }
 
 int
 init()
 {
-  int uio_index = 0;
+  int uio_index = 16;
   
   enable_bus_master(uio_index);
   
@@ -137,6 +137,14 @@ init()
   uint32_t cc;
   csts = regs32[0x1c / sizeof(uint32_t)];
   printf("%u\n", csts);
+  /*
+  cc = 0x2 << 14;
+  regs32[0x14 / sizeof(uint32_t)] = cc; // cc shutdown
+  sleep(4);
+  csts = regs32[0x1c / sizeof(uint32_t)];
+  printf("%u\n", csts);
+  */
+  
   cc = 0;
   regs32[0x14 / sizeof(uint32_t)] = cc; // cc disable
   sleep(1);
@@ -148,6 +156,9 @@ init()
   const int sz = 2*1024*1024;
   volatile void *aq = mmap(NULL, sz, PROT_READ | PROT_WRITE,
 			   MAP_PRIVATE | MAP_HUGETLB | MAP_ANONYMOUS | MAP_POPULATE, 0, 0);
+  
+  assert(aq != MAP_FAILED);
+  
   bzero((void*)aq, sz);
 
   acq = (volatile cqe_t *)(aq + 0x0);
@@ -164,7 +175,7 @@ init()
   // enable controller.
   cc = 1;
   regs32[0x14 / sizeof(uint32_t)] = cc; // cc enable
-  sleep(1);
+  sleep(3);
   csts = regs32[0x1c / sizeof(uint32_t)]; // check csts
   printf("%u\n", csts);
   assert(csts == 1);
@@ -272,6 +283,6 @@ int
 main()
 {
   init();
-  nvme_write(0, 1);
+  //nvme_write(0, 1);
   nvme_read(0, 1);
 }
