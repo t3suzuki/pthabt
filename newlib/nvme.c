@@ -84,31 +84,112 @@ typedef struct {
   } SF;
 } cqe_t;
 
+typedef struct {
+  uint16_t VID;
+  uint16_t SSVID;
+  char SN[20];
+  char MN[40];
+  // +64
+  char FR[8];
+  uint8_t RAB;
+  uint8_t IEEE[3];
+  uint8_t CMIC;
+  uint8_t MDTS;
+  uint16_t CNTLID;
+  uint32_t VER;
+  uint32_t RTD3R;
+  uint32_t RTD3E;
+  uint32_t OAES;
+  uint32_t CTRATT;
+  uint8_t Reserved0[12];
+  uint8_t FGUID[16];
+  // +128
+  uint8_t Reserved1[112];
+  uint8_t NVMEMI[16];  // Refer to the NVMe Management Interface Spec.
+  // +256
+  uint16_t OACS;
+  uint8_t ACL;
+  uint8_t AERL;
+  uint8_t FRMW;
+  uint8_t LPA;
+  uint8_t ELPE;
+  uint8_t NPSS;
+  uint8_t AVSCC;
+  uint8_t APSTA;
+  uint16_t WCTEMP;
+  uint16_t CCTEMP;
+  uint16_t MTFA;
+  uint32_t HMPRE;
+  uint32_t HMMIN;
+  uint8_t TNVMCAP[16];
+  uint8_t UNVMCAP[16];
+  uint32_t RPMBS;
+  uint16_t EDSTT;
+  uint8_t DSTO;
+  uint8_t FWUG;
+  uint16_t KAS;
+  uint16_t HCTMA;
+  uint16_t MNTMT;
+  uint16_t MXTMT;
+  uint32_t SANICAP;
+  uint8_t Reserved2[180];
+  // +512
+  uint8_t SQES;
+  uint8_t CQES;
+  uint16_t MAXCMD;
+  uint32_t NN;
+  uint16_t ONCS;
+  uint16_t FUSES;
+  uint8_t FNA;
+  uint8_t VWC;
+  uint16_t AWUN;
+  uint16_t AWUPF;
+  uint8_t NVSCC;
+  uint8_t Reserved3;
+  uint16_t ACWU;
+  uint16_t Reserved4;
+  uint32_t SGLS;
+  uint8_t Reserved5[228];
+  char SUBNQN[256];
+  // +1024
+  uint8_t Reserved6[768];
+  uint8_t NVMOF[256];  // Refer to the NVMe over Fabrics spec.
+  // +2048
+  uint8_t PSD[32][32];
+  // +3072
+  uint8_t VENDSPEC[1024];
+} IdentifyControllerData;
+
 static volatile uint32_t *regs32;
 static volatile uint64_t *regs64;
 static volatile void *buf;
 
-#define SQD (8)
-#define CQD (8)
+#define ASQD (8)
+#define ACQD (8)
+#define SQD (1024)
+#define CQD (1024)
 static uint32_t sqps[NQ];
 static uint32_t cqps[NQ];
 static volatile cqe_t *cqs[NQ];
 static volatile sqe_t *sqs[NQ];
+static int cqds[NQ];
+static int sqds[NQ];
 
 
 void
 sync_cmd(int qid)
 {
-  sqps[qid] = (sqps[qid] + 1) % SQD;
+  sqps[qid] = (sqps[qid] + 1) % sqds[qid];
   regs32[(0x1000 + 2 * qid) / sizeof(uint32_t)] = sqps[qid];
-  
+
+  printf("flag %d\n", cqs[qid][cqps[qid]].SF.P);
   while (1) {
     if (cqs[qid][cqps[qid]].SF.P)
       break;
     sleep(1);
   }
-  cqps[qid] = (cqps[qid] + 1) % CQD;
-  printf("cmd done\n");
+  printf("cmd done %d sc=%x flag %d\n", cqs[qid][cqps[qid]].SF.SCT, cqs[qid][cqps[qid]].SF.SC, cqs[qid][cqps[qid]].SF.P);
+  cqps[qid] = (cqps[qid] + 1) % cqds[qid];
 }
 
 int
@@ -169,12 +250,14 @@ init()
       sqs[iq] = (volatile sqe_t *)(q + 0x1000);
       sqps[iq] = 0;
       cqps[iq] = 0;
+      cqds[iq] = (iq == 0) ? ACQD : CQD;
+      sqds[iq] = (iq == 0) ? ASQD : SQD;
     }
   }
     
   regs64[0x30 / sizeof(uint64_t)] = v2p((size_t)cqs[0]); // Admin CQ phyaddr
   regs64[0x28 / sizeof(uint64_t)] = v2p((size_t)sqs[0]); // Admin SQ phyaddr
-  regs32[0x24 / sizeof(uint32_t)] = (CQD << 16) | SQD; // Admin Queue Entry Num
+  regs32[0x24 / sizeof(uint32_t)] = (cqds[0] << 16) | sqds[0]; // Admin Queue Entry Num
 
   
   printf("CQ phyaddr %p %lx\n", cqs[0], regs64[0x30 / sizeof(uint64_t)]);
@@ -200,8 +283,18 @@ init()
     bzero((void*)sqe, sizeof(sqe_t));
     sqe->CDW0.OPC = 0x6; // identity
     sqe->PRP1 = (uint64_t) v2p((size_t)buf);
-    sqe->CDW10 = 0;
+    sqe->NSID = 0xffffffff;
+    sqe->CDW10 = 0x1;
     sync_cmd(0);
+
+    /*
+    IdentifyControllerData *idata = (IdentifyControllerData *)buf;
+    printf("  VID: %4X\n", idata->VID);
+    printf("SSVID: %4X\n", idata->SSVID);
+    printf("   SN: %.20s\n", idata->SN);
+    printf("   MN: %.40s\n", idata->MN);
+    printf("   FR: %.8s\n", idata->FR);    
+    */
   }
 
   // CQ create
@@ -211,7 +304,7 @@ init()
     bzero((void*)sqe, sizeof(sqe_t));
     sqe->CDW0.OPC = 0x5; // create SQ
     sqe->PRP1 = (uint64_t) v2p((size_t)cqs[1]);
-    sqe->CDW10 = (SQD << 16) | qid;
+    sqe->CDW10 = (cqds[1] << 16) | qid;
     sqe->CDW11 = 1;
     sync_cmd(0);
     printf("CQ create done\n");
@@ -221,11 +314,10 @@ init()
   {
     volatile sqe_t *sqe = &sqs[0][sqps[0]];
     int qid = 1;
-    int size = 8;
     bzero((void*)sqe, sizeof(sqe_t));
     sqe->CDW0.OPC = 0x1; // create SQ
     sqe->PRP1 = (uint64_t) v2p((size_t)sqs[1]);
-    sqe->CDW10 = (SQD << 16) | qid;
+    sqe->CDW10 = (sqds[1] << 16) | qid;
     sqe->CDW11 = (qid << 16) | 1; // physically contiguous
     sync_cmd(0);
     printf("SQ create done\n");
@@ -279,13 +371,13 @@ nvme_write(uint64_t lba, int num_blk)
   sqe->CDW10 = lba & 0xffffffff;
   sqe->CDW11 = (lba >> 32);
   sqe->CDW12 = num_blk;
-  //sync_cmd(1);
+  sync_cmd(1);
 }
 
 int
 main()
 {
   init();
-  nvme_write(0, 1);
+  //nvme_write(0, 1);
   //nvme_read(0, 1);
 }
