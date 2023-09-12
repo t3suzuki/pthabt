@@ -180,6 +180,7 @@ void
 sync_cmd(int qid)
 {
   sqps[qid] = (sqps[qid] + 1) % sqds[qid];
+  asm volatile ("" : : : "memory");
   regs32[(0x1000 + 2 * qid) / sizeof(uint32_t)] = sqps[qid];
 
   printf("flag %d\n", cqs[qid][cqps[qid]].SF.P);
@@ -216,7 +217,7 @@ init()
   uint32_t csts;
   uint32_t cc;
   csts = regs32[0x1c / sizeof(uint32_t)];
-  printf("%u\n", csts);
+  printf("csts = %u\n", csts);
 
   /*
   cc = 0x2 << 14;
@@ -264,7 +265,7 @@ init()
   printf("SQ phyaddr %p %lx\n", sqs[0], regs64[0x28 / sizeof(uint64_t)]);
 
   // enable controller.
-  cc = 1;
+  cc = 0x460001;
   regs32[0x14 / sizeof(uint32_t)] = cc; // cc enable
   sleep(3);
   csts = regs32[0x1c / sizeof(uint32_t)]; // check csts
@@ -280,21 +281,21 @@ init()
   {
     printf("identity cmd...\n");
     volatile sqe_t *sqe = &sqs[0][sqps[0]];
+    printf("%p\n", sqe);
     bzero((void*)sqe, sizeof(sqe_t));
+    bzero((void*)buf, 4096);
     sqe->CDW0.OPC = 0x6; // identity
     sqe->PRP1 = (uint64_t) v2p((size_t)buf);
     sqe->NSID = 0xffffffff;
     sqe->CDW10 = 0x1;
     sync_cmd(0);
 
-    /*
     IdentifyControllerData *idata = (IdentifyControllerData *)buf;
     printf("  VID: %4X\n", idata->VID);
     printf("SSVID: %4X\n", idata->SSVID);
     printf("   SN: %.20s\n", idata->SN);
     printf("   MN: %.40s\n", idata->MN);
     printf("   FR: %.8s\n", idata->FR);    
-    */
   }
 
   // CQ create
@@ -302,12 +303,14 @@ init()
     volatile sqe_t *sqe = &sqs[0][sqps[0]];
     int qid = 1;
     bzero((void*)sqe, sizeof(sqe_t));
-    sqe->CDW0.OPC = 0x5; // create SQ
-    sqe->PRP1 = (uint64_t) v2p((size_t)cqs[1]);
-    sqe->CDW10 = (cqds[1] << 16) | qid;
+    printf("%p\n", sqe);
+    sqe->CDW0.OPC = 0x5; // create CQ
+    sqe->PRP1 = (uint64_t) v2p((size_t)cqs[qid]);
+    sqe->CDW10 = (cqds[qid] << 16) | qid;
     sqe->CDW11 = 1;
+    
     sync_cmd(0);
-    printf("CQ create done\n");
+    printf("CQ create done %d\n", cqds[1]);
   }
 
   // SQ create
@@ -316,8 +319,8 @@ init()
     int qid = 1;
     bzero((void*)sqe, sizeof(sqe_t));
     sqe->CDW0.OPC = 0x1; // create SQ
-    sqe->PRP1 = (uint64_t) v2p((size_t)sqs[1]);
-    sqe->CDW10 = (sqds[1] << 16) | qid;
+    sqe->PRP1 = (uint64_t) v2p((size_t)sqs[qid]);
+    sqe->CDW10 = (sqds[qid] << 16) | qid;
     sqe->CDW11 = (qid << 16) | 1; // physically contiguous
     sync_cmd(0);
     printf("SQ create done\n");
