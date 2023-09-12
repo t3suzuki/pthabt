@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <strings.h>
+#include <string.h>
 #include <stdio.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -97,17 +98,17 @@ static uint32_t cqp = 0;
 static volatile void *buf;
 
 void
-sync_cmd()
+sync_cmd(int *sqp, int *cqp)
 {
-  asqp = (asqp + 1) % ASQD;
-  regs32[0x1000 / sizeof(uint32_t)] = asqp;
+  *sqp = (*sqp + 1) % ASQD;
+  regs32[0x1000 / sizeof(uint32_t)] = *sqp;
   
   while (1) {
-    if (acq[acqp].SF.P)
+    if (acq[*cqp].SF.P)
       break;
     sleep(1);
   }
-  acqp = (acqp + 1) % ACQD;
+  *cqp = (*cqp + 1) % ACQD;
   printf("cmd done\n");
 }
 
@@ -179,12 +180,13 @@ init()
 
   // identity
   {
+    printf("identity cmd...\n");
     volatile sqe_t *sqe = &asq[asqp];
     bzero((void*)sqe, sizeof(sqe_t));
     sqe->CDW0.OPC = 0x6; // identity
-    sqe->PRP1 = (uint64_t) v2p(buf);
+    sqe->PRP1 = (uint64_t) v2p((size_t)buf);
     sqe->CDW10 = 0;
-    sync_cmd();
+    sync_cmd(&asqp, &acqp);
   }
 
   // CQ create
@@ -194,10 +196,10 @@ init()
     int size = 8;
     bzero((void*)sqe, sizeof(sqe_t));
     sqe->CDW0.OPC = 0x5; // create SQ
-    sqe->PRP1 = (uint64_t) v2p(cq);
+    sqe->PRP1 = (uint64_t) v2p((size_t)cq);
     sqe->CDW10 = ((size-1) << 16) | qid;
     sqe->CDW11 = (qid << 16) | 1;
-    sync_cmd();
+    sync_cmd(&asqp, &acqp);
     printf("CQ create done\n");
   }
 
@@ -208,10 +210,10 @@ init()
     int size = 8;
     bzero((void*)sqe, sizeof(sqe_t));
     sqe->CDW0.OPC = 0x1; // create SQ
-    sqe->PRP1 = (uint64_t) v2p(sq);
+    sqe->PRP1 = (uint64_t) v2p((size_t)sq);
     sqe->CDW10 = ((size-1) << 16) | qid;
     sqe->CDW11 = 1; // physically contiguous
-    sync_cmd();
+    sync_cmd(&asqp, &acqp);
     printf("SQ create done\n");
   }
 
@@ -220,11 +222,11 @@ init()
     volatile sqe_t *sqe = &asq[asqp];
     bzero((void*)sqe, sizeof(sqe_t));
     sqe->CDW0.OPC = 0x6; // identity
-    bzero(buf, 4096);
-    sqe->PRP1 = (uint64_t) v2p(buf);
+    bzero((void*)buf, 4096);
+    sqe->PRP1 = (uint64_t) v2p((size_t)buf);
     sqe->NSID = 0;
     sqe->CDW10 = 2;
-    sync_cmd();
+    sync_cmd(&asqp, &acqp);
 
     uint32_t *id_list = (uint32_t *)buf;
     int i;
@@ -237,24 +239,39 @@ init()
 }
 
 void
-nvme_read(int lba, int num_blk)
+nvme_read(uint64_t lba, int num_blk)
 {
   volatile sqe_t *sqe = &sq[sqp];
-  int qid = 0;
-  int size = 8;
   bzero((void*)sqe, sizeof(sqe_t));
+  bzero((void*)buf, 4096);
   sqe->CDW0.OPC = 0x2; // read
-  sqe->PRP1 = (uint64_t) v2p(buf);
+  sqe->PRP1 = (uint64_t) v2p((size_t)buf);
   sqe->NSID = 1;
   sqe->CDW10 = lba & 0xffffffff;
   sqe->CDW11 = (lba >> 32);
   sqe->CDW12 = num_blk;
-  sync_cmd();
+  sync_cmd(&sqp, &cqp);
+}
+
+void
+nvme_write(uint64_t lba, int num_blk)
+{
+  volatile sqe_t *sqe = &sq[sqp];
+  bzero((void*)sqe, sizeof(sqe_t));
+  memset((void *)buf, 0x5a, 4096);
+  sqe->CDW0.OPC = 0x1; // write
+  sqe->PRP1 = (uint64_t) v2p((size_t)buf);
+  sqe->NSID = 1;
+  sqe->CDW10 = lba & 0xffffffff;
+  sqe->CDW11 = (lba >> 32);
+  sqe->CDW12 = num_blk;
+  sync_cmd(&sqp, &cqp);
 }
 
 int
 main()
 {
   init();
+  nvme_write(0, 1);
   nvme_read(0, 1);
 }
