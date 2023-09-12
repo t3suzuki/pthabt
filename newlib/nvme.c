@@ -181,7 +181,7 @@ sync_cmd(int qid)
 {
   sqps[qid] = (sqps[qid] + 1) % sqds[qid];
   asm volatile ("" : : : "memory");
-  regs32[(0x1000 + 2 * qid) / sizeof(uint32_t)] = sqps[qid];
+  regs32[0x1000 / sizeof(uint32_t) + 2 * qid] = sqps[qid];
 
   printf("flag %d\n", cqs[qid][cqps[qid]].SF.P);
   while (1) {
@@ -248,11 +248,12 @@ init()
       bzero((void*)q, sz);
       
       cqs[iq] = (volatile cqe_t *)(q + 0x0);
-      sqs[iq] = (volatile sqe_t *)(q + 0x1000);
-      sqps[iq] = 0;
+      sqs[iq] = (volatile sqe_t *)(q + 0x4000);
       cqps[iq] = 0;
+      sqps[iq] = 0;
       cqds[iq] = (iq == 0) ? ACQD : CQD;
       sqds[iq] = (iq == 0) ? ASQD : SQD;
+      printf("%d cqphy=%lx sqphy=%lx\n", iq, v2p((size_t)cqs[iq]), v2p((size_t)sqs[iq]));
     }
   }
     
@@ -347,10 +348,23 @@ init()
   
 }
 
+
+void
+nvme_flush()
+{
+  int qid = 1;
+  volatile sqe_t *sqe = &sqs[qid][sqps[qid]];
+  bzero((void*)sqe, sizeof(sqe_t));
+  sqe->CDW0.OPC = 0x0; // flush
+  sqe->NSID = 1;
+  sync_cmd(qid);
+}
+
 void
 nvme_read(uint64_t lba, int num_blk)
 {
-  volatile sqe_t *sqe = &sqs[1][sqps[1]];
+  int qid = 1;
+  volatile sqe_t *sqe = &sqs[qid][sqps[qid]];
   bzero((void*)sqe, sizeof(sqe_t));
   bzero((void*)buf, 4096);
   sqe->CDW0.OPC = 0x2; // read
@@ -359,7 +373,9 @@ nvme_read(uint64_t lba, int num_blk)
   sqe->CDW10 = lba & 0xffffffff;
   sqe->CDW11 = (lba >> 32);
   sqe->CDW12 = num_blk;
-  sync_cmd(1);
+  sync_cmd(qid);
+
+  printf("%x\n", ((uint32_t*)buf)[0]);
 }
 
 void
@@ -370,7 +386,7 @@ nvme_write(uint64_t lba, int num_blk)
   memset((void *)buf, 0x5a, 4096);
   sqe->CDW0.OPC = 0x1; // write
   sqe->PRP1 = (uint64_t) v2p((size_t)buf);
-  sqe->NSID = 0xffffffff;;
+  sqe->NSID = 1;
   sqe->CDW10 = lba & 0xffffffff;
   sqe->CDW11 = (lba >> 32);
   sqe->CDW12 = num_blk;
@@ -381,6 +397,6 @@ int
 main()
 {
   init();
-  nvme_write(0, 1);
-  //nvme_read(0, 1);
+  //nvme_write(0, 1);
+  nvme_read(0, 1);
 }
