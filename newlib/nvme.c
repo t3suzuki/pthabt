@@ -86,6 +86,27 @@ typedef struct {
 
 static uint32_t asqp = 0;
 static uint32_t acqp = 0;
+static volatile cqe_t *acq;
+static volatile sqe_t *asq;
+static volatile uint32_t *regs32;
+static volatile uint64_t *regs64;
+static volatile cqe_t *cq;
+static volatile sqe_t *sq;
+
+void
+sync_cmd()
+{
+  asqp = (asqp + 1) % ASQD;
+  regs32[0x1000 / sizeof(uint32_t)] = asqp;
+  
+  while (1) {
+    if (acq[acqp].SF.P)
+      break;
+    sleep(1);
+  }
+  acqp = (acqp + 1) % ACQD;
+  printf("cmd done\n");
+}
 
 int
 init()
@@ -101,8 +122,8 @@ init()
     perror("open");
     return -1;
   }
-  volatile uint32_t *regs32 = mmap(0, 0x4000, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-  volatile uint64_t *regs64 = (volatile uint64_t *)regs32;
+  regs32 = mmap(0, 0x4000, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  regs64 = (volatile uint64_t *)regs32;
   if (regs32 == MAP_FAILED) {
     perror("mmap");
     return -1;
@@ -125,13 +146,18 @@ init()
 			   MAP_PRIVATE | MAP_HUGETLB | MAP_ANONYMOUS | MAP_POPULATE, 0, 0);
   bzero((void*)aq, sz);
 
-  volatile cqe_t *acq = (volatile cqe_t *)(aq + 0x0);
-  volatile sqe_t *asq = (volatile sqe_t *)(aq + 0x1000);
+  acq = (volatile cqe_t *)(aq + 0x0);
+  asq = (volatile sqe_t *)(aq + 0x1000);
 
   regs64[0x30 / sizeof(uint64_t)] = v2p((size_t)acq); // Admin CQ phyaddr
   regs64[0x28 / sizeof(uint64_t)] = v2p((size_t)asq); // Admin SQ phyaddr
   regs32[0x24 / sizeof(uint32_t)] = (ACQD << 16) | ASQD; // Admin Queue Entry Num
 
+  
+  printf("CQ phyaddr %p %lx\n", acq, regs64[0x30 / sizeof(uint64_t)]);
+  printf("SQ phyaddr %p %lx\n", asq, regs64[0x28 / sizeof(uint64_t)]);
+
+  // enable controller.
   cc = 1;
   regs32[0x14 / sizeof(uint32_t)] = cc; // cc enable
   sleep(1);
@@ -141,28 +167,53 @@ init()
 
   volatile void *queue = mmap(NULL, sz, PROT_READ | PROT_WRITE,
 			      MAP_PRIVATE | MAP_HUGETLB | MAP_ANONYMOUS | MAP_POPULATE, 0, 0);
+  cq = (volatile cqe_t *)(queue + 0x0);
+  sq = (volatile sqe_t *)(queue + 0x1000);
   bzero((void*)queue, sz);
 
   volatile void *buf = mmap(NULL, sz, PROT_READ | PROT_WRITE,
 			    MAP_PRIVATE | MAP_HUGETLB | MAP_ANONYMOUS | MAP_POPULATE, 0, 0);
-  
-  volatile sqe_t *sqe = &asq[asqp];
-  int qid = 1;
-  int size = 8;
-  bzero((void*)sqe, sizeof(sqe_t));
-  sqe->CDW0.OPC = 0x1; // create SQ
-  sqe->CDW0.CID = asqp;
-  sqe->PRP1 = (uint64_t) buf;
-  sqe->CDW10 = (size << 16) | qid;
-  sqe->CDW11 = 1; // physically contiguous
-  
-  asqp = (asqp + 1) % ASQD;
-  regs32[0] = asqp;
 
-  while (1) {
-    if (acq[acqp].SF.P)
-      break;
+  // identity
+  {
+    volatile sqe_t *sqe = &asq[asqp];
+    bzero((void*)sqe, sizeof(sqe_t));
+    sqe->CDW0.OPC = 0x6; // identity
+    sqe->PRP1 = (uint64_t) buf;
+    sqe->CDW10 = 0;
+    sync_cmd();
   }
+
+  // CQ create
+  {
+    volatile sqe_t *sqe = &asq[asqp];
+    int qid = 0;
+    int size = 8;
+    bzero((void*)sqe, sizeof(sqe_t));
+    sqe->CDW0.OPC = 0x5; // create SQ
+    sqe->PRP1 = (uint64_t) cq;
+    sqe->CDW10 = ((size-1) << 16) | qid;
+    sqe->CDW11 = (qid << 16) | 1;
+    sync_cmd();
+    printf("CQ create done\n");
+  }
+
+  // SQ create
+  {
+    volatile sqe_t *sqe = &asq[asqp];
+    int qid = 0;
+    int size = 8;
+    bzero((void*)sqe, sizeof(sqe_t));
+    sqe->CDW0.OPC = 0x1; // create SQ
+    sqe->PRP1 = (uint64_t) sq;
+    sqe->CDW10 = ((size-1) << 16) | qid;
+    sqe->CDW11 = 1; // physically contiguous
+    sync_cmd();
+    printf("SQ create done\n");
+  }
+
+  
+
 }
 
 int
