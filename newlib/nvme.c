@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include <assert.h>
 
-#define NQ (1)
+#define NQ (2)
 
 static int enable_bus_master(int uio_index)
 {
@@ -279,13 +279,13 @@ nvme_write(uint64_t lba, int num_blk)
   sqe->CDW10 = lba & 0xffffffff;
   sqe->CDW11 = (lba >> 32);
   sqe->CDW12 = num_blk;
-  sync_cmd(1);
+  //sync_cmd(1);
 }
 
 int
 main()
 {
   init();
-  //nvme_write(0, 1);
+  nvme_write(0, 1);
   //nvme_read(0, 1);
 }
