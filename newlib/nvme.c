@@ -370,7 +370,7 @@ nvme_write(uint64_t lba, int num_blk)
   memset((void *)buf, 0x5a, 4096);
   sqe->CDW0.OPC = 0x1; // write
   sqe->PRP1 = (uint64_t) v2p((size_t)buf);
-  sqe->NSID = 1;
+  sqe->NSID = 0xffffffff;;
   sqe->CDW10 = lba & 0xffffffff;
   sqe->CDW11 = (lba >> 32);
   sqe->CDW12 = num_blk;
@@ -381,6 +381,6 @@ int
 main()
 {
   init();
-  //nvme_write(0, 1);
+  nvme_write(0, 1);
   //nvme_read(0, 1);
 }
