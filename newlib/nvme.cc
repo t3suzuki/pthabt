@@ -302,9 +302,7 @@ void
 sync_cmd(int qid)
 {
   sqps[qid] = (sqps[qid] + 1) % sqds[qid];
-  //volatile cqe_t *cqe = &cqs[qid][cqps[qid]];
   volatile cqe_t *cqe = qps[0]->get_cqe(0);
-  printf("%p flag %d\n", cqe, cqe->SF.P);
   asm volatile ("" : : : "memory");
   regs32[0x1000 / sizeof(uint32_t) + 2 * qid] = sqps[qid];
 
@@ -389,45 +387,16 @@ init()
   
   assert(csts == 0);
 
-#define OLD_VERSION (0)
-  
-#if OLD_VERSION
-  int iq;
-    for (iq=0; iq<1; iq++) {
-      const int sz = 2*1024*1024;
-
-      volatile void *q = mmap(NULL, sz, PROT_READ | PROT_WRITE,
-			      MAP_PRIVATE | MAP_HUGETLB | MAP_ANONYMOUS | MAP_POPULATE, 0, 0);
-      
-      assert(q != MAP_FAILED);
-    
-      bzero((void*)q, sz);
-      
-      cqs[iq] = (volatile cqe_t *)(q + 0x0);
-      sqs[iq] = (volatile sqe_t *)(q + 0x4000);
-      cqps[iq] = 0;
-      sqps[iq] = 0;
-      cqds[iq] = (iq == 0) ? ACQD : CQD;
-      sqds[iq] = (iq == 0) ? ASQD : SQD;
-      printf("%d %p cqphy=%lx %p sqphy=%lx\n", iq, cqs[iq], v2p((size_t)cqs[iq]), sqs[iq], v2p((size_t)sqs[iq]));
-  
-    }
-  regs64[0x30 / sizeof(uint64_t)] = v2p((size_t)cqs[0]); // Admin CQ phyaddr
-  regs64[0x28 / sizeof(uint64_t)] = v2p((size_t)sqs[0]); // Admin SQ phyaddr
-  regs32[0x24 / sizeof(uint32_t)] = (cqds[0] << 16) | sqds[0]; // Admin Queue Entry Num
-#else
-      cqps[0] = 0;
-      sqps[0] = 0;
-      cqds[0] = ACQD;
-      sqds[0] = ASQD;
+  cqps[0] = 0;
+  sqps[0] = 0;
+  cqds[0] = ACQD;
+  sqds[0] = ASQD;
   qps[0] = new QP(0);
-
+  
   regs64[0x30 / sizeof(uint64_t)] = qps[0]->cq_pa(); // Admin CQ phyaddr
-  //  regs64[0x30 / sizeof(uint64_t)] = v2p((size_t)cqs[0]); // Admin CQ phyaddr
   regs64[0x28 / sizeof(uint64_t)] = qps[0]->sq_pa(); // Admin SQ phyaddr
   regs32[0x24 / sizeof(uint32_t)] = (qps[0]->n_cqe << 16) | qps[0]->n_sqe; // Admin Queue Entry Num
   printf("%p %lx %p %lx\n", qps[0]->get_cqe(0), qps[0]->cq_pa(), qps[0]->get_sqe(0), qps[0]->sq_pa());
-#endif
 
   // enable controller.
   cc = 0x460001;
@@ -451,30 +420,25 @@ init()
   buf = mmap(NULL, sz, PROT_READ | PROT_WRITE,
             MAP_PRIVATE | MAP_HUGETLB | MAP_ANONYMOUS | MAP_POPULATE, 0, 0);
 
-#if 1 //OLD_VERSION
-   // identity
-   {
-     printf("identity cmd...\n");
-     volatile sqe_t *sqe = qps[0]->get_sqe(0);
-     //volatile sqe_t *sqe = &sqs[0][sqps[0]];
+  // identity
+  {
+    printf("identity cmd...\n");
+    volatile sqe_t *sqe = qps[0]->get_sqe(0);
     printf("%p\n", sqe);
-    bzero((void*)sqe, sizeof(sqe_t));
-    bzero((void*)buf, 4096);
     int cid;
-     sqe->CDW0.OPC = 0x6; // identity
+    sqe->CDW0.OPC = 0x6; // identity
     sqe->PRP1 = (uint64_t) v2p((size_t)buf);
-     sqe->NSID = 0xffffffff;
-     sqe->CDW10 = 0x1;
+    sqe->NSID = 0xffffffff;
+    sqe->CDW10 = 0x1;
     sync_cmd(0);
 
     IdentifyControllerData *idata = (IdentifyControllerData *)buf;
-     printf("  VID: %4X\n", idata->VID);
-     printf("SSVID: %4X\n", idata->SSVID);
-     printf("   SN: %.20s\n", idata->SN);
-     printf("   MN: %.40s\n", idata->MN);
-     printf("   FR: %.8s\n", idata->FR);
-   }
-#endif
+    printf("  VID: %4X\n", idata->VID);
+    printf("SSVID: %4X\n", idata->SSVID);
+    printf("   SN: %.20s\n", idata->SN);
+    printf("   MN: %.40s\n", idata->MN);
+    printf("   FR: %.8s\n", idata->FR);
+  }
   
   // identity
   {
