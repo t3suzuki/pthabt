@@ -253,8 +253,8 @@ public:
   void sq_doorbell() {
     printf("sq_tail %d\n", sq_tail);
     asm volatile ("" : : : "memory");
-    //*(doorbell) = sq_tail;
-    regs32[0x1000 / sizeof(uint32_t) + 2 * _qid] = sq_tail;
+    *(doorbell) = sq_tail;
+    //regs32[0x1000 / sizeof(uint32_t) + 2 * _qid] = sq_tail;
     printf("sq_tail %d %d\n", sq_tail, _qid);
   }
   char *get_buf(int cid) {
@@ -301,10 +301,12 @@ QP *qps[NQ];
 void
 sync_cmd(int qid)
 {
-  sqps[qid] = (sqps[qid] + 1) % sqds[qid];
   volatile cqe_t *cqe = qps[0]->get_cqe(0);
+  /*
+  sqps[qid] = (sqps[qid] + 1) % sqds[qid];
   asm volatile ("" : : : "memory");
   regs32[0x1000 / sizeof(uint32_t) + 2 * qid] = sqps[qid];
+  */
 
   printf("flag %d\n", cqe->SF.P);
   while (1) {
@@ -423,16 +425,16 @@ init()
   // identity
   {
     printf("identity cmd...\n");
-    volatile sqe_t *sqe = qps[0]->get_sqe(0);
-    printf("%p\n", sqe);
     int cid;
+    volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
+    printf("%p\n", sqe);
     sqe->CDW0.OPC = 0x6; // identity
-    sqe->PRP1 = (uint64_t) v2p((size_t)buf);
     sqe->NSID = 0xffffffff;
     sqe->CDW10 = 0x1;
+    qps[0]->sq_doorbell();
     sync_cmd(0);
 
-    IdentifyControllerData *idata = (IdentifyControllerData *)buf;
+    IdentifyControllerData *idata = (IdentifyControllerData *)qps[0]->get_buf(cid);
     printf("  VID: %4X\n", idata->VID);
     printf("SSVID: %4X\n", idata->SSVID);
     printf("   SN: %.20s\n", idata->SN);
