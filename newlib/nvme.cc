@@ -181,6 +181,7 @@ void
 sync_cmd(int qid)
 {
   sqps[qid] = (sqps[qid] + 1) % sqds[qid];
+  printf("%p flag %d\n", &cqs[qid][cqps[qid]], cqs[qid][cqps[qid]].SF.P);
   asm volatile ("" : : : "memory");
   regs32[0x1000 / sizeof(uint32_t) + 2 * qid] = sqps[qid];
 
@@ -233,6 +234,7 @@ char *malloc_2MB()
     perror("mmap");
     exit(1);
   }
+  bzero(buf, sz);
   return buf;
 }
 
@@ -249,16 +251,18 @@ private:
   int cq_phase;
   char *sqcq;
   int done_flag[QD];
+  volatile uint32_t *doorbell;
+  char *buf;
+  int _qid;
+public:
   inline cqe_t *get_cqe(int index) {
     return (cqe_t *)(sqcq + 0x0) + index;
   }
   inline sqe_t *get_sqe(int index) {
     return (sqe_t *)(sqcq + sq_offset) + index;
   }
-  volatile uint32_t *doorbell;
-  char *buf;
-public:
   QP(int qid) {
+    _qid = qid;
     sq_tail = 0;
     cq_tail = 0;
     cq_phase = 1;
@@ -272,7 +276,6 @@ public:
       bzero((void*)sqe, sizeof(sqe_t));
       sqe->NSID = 1;
       sqe->PRP1 = buf_pa + 4096 * i;
-      sqe->CDW11 = 0;
       sqe->CDW0.CID = i;
     }
     doorbell = &regs32[0x1000 / sizeof(uint32_t) + 2 * qid];
@@ -294,15 +297,20 @@ public:
     return sqe;
   }
   void sq_doorbell() {
+    printf("sq_tail %d\n", sq_tail);
     asm volatile ("" : : : "memory");
-    *(doorbell+0) = sq_tail;
+    //*(doorbell) = sq_tail;
+    regs32[0x1000 / sizeof(uint32_t) + 2 * _qid] = sq_tail;
+    printf("sq_tail %d %d\n", sq_tail, _qid);
   }
   char *get_buf(int cid) {
-    return &buf[4096 + cid];
+    return buf + 4096 * cid;
   }
   void check_cq() {
     while (1) {
-      cqe_t *cqe = get_cqe(cq_tail);
+      volatile cqe_t *cqe = get_cqe(cq_tail);
+      //printf("%p %lx\n", cqe, v2p((size_t)cqe));
+      printf("cmd done %d sc=%x flag %d\n", cqe->SF.SCT, cqe->SF.SC, cqe->SF.P);
       if (cqe->SF.P != cq_phase)
 	break;
       assert(cqe->SF.SC == 0);
@@ -316,9 +324,14 @@ public:
     }
     *(doorbell+1) = cq_tail;
   }
-  void req_and_wait() {
+  void req_and_wait(int cid) {
     sq_doorbell();
-    check_cq();
+    while (1) {
+      check_cq();
+      if (done(cid))
+	break;
+      sleep(1);
+    }
   }
   int done(int cid) {
     return done_flag[cid];
@@ -373,31 +386,11 @@ init()
   
   assert(csts == 0);
 
-
-  qps[0] = new QP(0);
+#define OLD_VERSION (0)
   
-  regs64[0x30 / sizeof(uint64_t)] = qps[0]->cq_pa(); // Admin CQ phyaddr
-  regs64[0x28 / sizeof(uint64_t)] = qps[0]->sq_pa(); // Admin SQ phyaddr
-  regs32[0x24 / sizeof(uint32_t)] = (qps[0]->n_cqe << 16) | qps[0]->n_sqe; // Admin Queue Entry Num
-  
-  printf("CQ phyaddr %lx\n", regs64[0x30 / sizeof(uint64_t)]);
-  printf("SQ phyaddr %lx\n", regs64[0x28 / sizeof(uint64_t)]);
-
-  exit(1);
-
-  // enable controller.
-  cc = 0x460001;
-  regs32[0x14 / sizeof(uint32_t)] = cc; // cc enable
-  sleep(3);
-  csts = regs32[0x1c / sizeof(uint32_t)]; // check csts
-  printf("%u\n", csts);
-  assert(csts == 1);
-
-  {
-    int iq;
-    for (iq=1; iq<NQ; iq++) {
-      qps[iq] = new QP(iq);
-      /*
+#if OLD_VERSION
+  int iq;
+    for (iq=0; iq<1; iq++) {
       const int sz = 2*1024*1024;
 
       volatile void *q = mmap(NULL, sz, PROT_READ | PROT_WRITE,
@@ -413,29 +406,88 @@ init()
       sqps[iq] = 0;
       cqds[iq] = (iq == 0) ? ACQD : CQD;
       sqds[iq] = (iq == 0) ? ASQD : SQD;
-      printf("%d cqphy=%lx sqphy=%lx\n", iq, v2p((size_t)cqs[iq]), v2p((size_t)sqs[iq]));
-      */
+      printf("%d %p cqphy=%lx %p sqphy=%lx\n", iq, cqs[iq], v2p((size_t)cqs[iq]), sqs[iq], v2p((size_t)sqs[iq]));
+  
     }
-  }
-    
+  regs64[0x30 / sizeof(uint64_t)] = v2p((size_t)cqs[0]); // Admin CQ phyaddr
+  regs64[0x28 / sizeof(uint64_t)] = v2p((size_t)sqs[0]); // Admin SQ phyaddr
+  regs32[0x24 / sizeof(uint32_t)] = (cqds[0] << 16) | sqds[0]; // Admin Queue Entry Num
+#else
+  qps[0] = new QP(0);
 
+  regs64[0x30 / sizeof(uint64_t)] = qps[0]->cq_pa(); // Admin CQ phyaddr
+  regs64[0x28 / sizeof(uint64_t)] = qps[0]->sq_pa(); // Admin SQ phyaddr
+  regs32[0x24 / sizeof(uint32_t)] = (qps[0]->n_cqe << 16) | qps[0]->n_sqe; // Admin Queue Entry Num
+  printf("%p %lx %p %lx\n", qps[0]->get_cqe(0), qps[0]->cq_pa(), qps[0]->get_sqe(0), qps[0]->sq_pa());
+#endif
+
+  // enable controller.
+  cc = 0x460001;
+  regs32[0x14 / sizeof(uint32_t)] = cc; // cc enable
+  sleep(3);
+  csts = regs32[0x1c / sizeof(uint32_t)]; // check csts
+  printf("csts %u\n", csts);
+  assert(csts == 1);
+
+
+  {
+    int iq;
+    for (iq=1; iq<NQ; iq++) {
+      qps[iq] = new QP(iq);
+    }
+
+  }
+
+
+  const int sz = 2*1024*1024;
+  buf = mmap(NULL, sz, PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_HUGETLB | MAP_ANONYMOUS | MAP_POPULATE, 0, 0);
+
+#if OLD_VERSION
+   // identity
+   {
+     printf("identity cmd...\n");
+    volatile sqe_t *sqe = &sqs[0][sqps[0]];
+    printf("%p\n", sqe);
+    bzero((void*)sqe, sizeof(sqe_t));
+    bzero((void*)buf, 4096);
+    int cid;
+     sqe->CDW0.OPC = 0x6; // identity
+    sqe->PRP1 = (uint64_t) v2p((size_t)buf);
+     sqe->NSID = 0xffffffff;
+     sqe->CDW10 = 0x1;
+    sync_cmd(0);
+
+    IdentifyControllerData *idata = (IdentifyControllerData *)buf;
+     printf("  VID: %4X\n", idata->VID);
+     printf("SSVID: %4X\n", idata->SSVID);
+     printf("   SN: %.20s\n", idata->SN);
+     printf("   MN: %.40s\n", idata->MN);
+     printf("   FR: %.8s\n", idata->FR);
+   }
+#endif
+  
   // identity
   {
     printf("identity cmd...\n");
     int cid;
-    sqe_t *sqe = qps[0]->new_sqe(&cid);
+    volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
+    printf("sqe %p\n", sqe);
     sqe->CDW0.OPC = 0x6; // identity
     sqe->NSID = 0xffffffff;
     sqe->CDW10 = 0x1;
-    qps[0]->req_and_wait();
+    printf("cid %d\n", cid);
+    qps[0]->req_and_wait(cid);
 
-    IdentifyControllerData *idata = (IdentifyControllerData *)qps[0]->get_buf(0);
+    IdentifyControllerData *idata = (IdentifyControllerData *)qps[0]->get_buf(cid);
     printf("  VID: %4X\n", idata->VID);
     printf("SSVID: %4X\n", idata->SSVID);
     printf("   SN: %.20s\n", idata->SN);
     printf("   MN: %.40s\n", idata->MN);
     printf("   FR: %.8s\n", idata->FR);    
   }
+  exit(1);
+
 
 #if 0
   // CQ create
