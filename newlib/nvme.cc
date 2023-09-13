@@ -177,52 +177,6 @@ static int cqds[NQ];
 static int sqds[NQ];
 
 
-void
-sync_cmd(int qid)
-{
-  sqps[qid] = (sqps[qid] + 1) % sqds[qid];
-  printf("%p flag %d\n", &cqs[qid][cqps[qid]], cqs[qid][cqps[qid]].SF.P);
-  asm volatile ("" : : : "memory");
-  regs32[0x1000 / sizeof(uint32_t) + 2 * qid] = sqps[qid];
-
-  printf("flag %d\n", cqs[qid][cqps[qid]].SF.P);
-  while (1) {
-    if (cqs[qid][cqps[qid]].SF.P)
-      break;
-    sleep(1);
-  }
-  printf("cmd done %d sc=%x flag %d\n", cqs[qid][cqps[qid]].SF.SCT, cqs[qid][cqps[qid]].SF.SC, cqs[qid][cqps[qid]].SF.P);
-  cqps[qid] = (cqps[qid] + 1) % cqds[qid];
-}
-
-
-
-void
-nvme_flush()
-{
-  int qid = 1;
-  volatile sqe_t *sqe = &sqs[qid][sqps[qid]];
-  bzero((void*)sqe, sizeof(sqe_t));
-  sqe->CDW0.OPC = 0x0; // flush
-  sqe->NSID = 1;
-  sync_cmd(qid);
-}
-
-void
-nvme_read(uint64_t lba, int num_blk)
-{
-  int qid = 1;
-  volatile sqe_t *sqe = &sqs[qid][sqps[qid]];
-  bzero((void*)sqe, sizeof(sqe_t));
-  bzero((void*)buf, 4096);
-  sqe->CDW0.OPC = 0x2; // read
-  sqe->PRP1 = (uint64_t) v2p((size_t)buf);
-  sqe->NSID = 1;
-  sqe->CDW10 = lba & 0xffffffff;
-  sqe->CDW11 = (lba >> 32);
-  sqe->CDW12 = num_blk;
-  sync_cmd(qid);
-}
 
 
 char *malloc_2MB()
@@ -344,6 +298,55 @@ QP *qps[NQ];
 
 
 
+void
+sync_cmd(int qid)
+{
+  sqps[qid] = (sqps[qid] + 1) % sqds[qid];
+  //volatile cqe_t *cqe = &cqs[qid][cqps[qid]];
+  volatile cqe_t *cqe = qps[0]->get_cqe(0);
+  printf("%p flag %d\n", cqe, cqe->SF.P);
+  asm volatile ("" : : : "memory");
+  regs32[0x1000 / sizeof(uint32_t) + 2 * qid] = sqps[qid];
+
+  printf("flag %d\n", cqe->SF.P);
+  while (1) {
+    if (cqe->SF.P)
+      break;
+    sleep(1);
+  }
+  printf("cmd done %d sc=%x flag %d\n", cqe->SF.SCT, cqe->SF.SC, cqe->SF.P);
+  cqps[qid] = (cqps[qid] + 1) % cqds[qid];
+}
+
+
+
+void
+nvme_flush()
+{
+  int qid = 1;
+  volatile sqe_t *sqe = &sqs[qid][sqps[qid]];
+  bzero((void*)sqe, sizeof(sqe_t));
+  sqe->CDW0.OPC = 0x0; // flush
+  sqe->NSID = 1;
+  sync_cmd(qid);
+}
+
+void
+nvme_read(uint64_t lba, int num_blk)
+{
+  int qid = 1;
+  volatile sqe_t *sqe = &sqs[qid][sqps[qid]];
+  bzero((void*)sqe, sizeof(sqe_t));
+  bzero((void*)buf, 4096);
+  sqe->CDW0.OPC = 0x2; // read
+  sqe->PRP1 = (uint64_t) v2p((size_t)buf);
+  sqe->NSID = 1;
+  sqe->CDW10 = lba & 0xffffffff;
+  sqe->CDW11 = (lba >> 32);
+  sqe->CDW12 = num_blk;
+  sync_cmd(qid);
+}
+
 int
 init()
 {
@@ -413,9 +416,14 @@ init()
   regs64[0x28 / sizeof(uint64_t)] = v2p((size_t)sqs[0]); // Admin SQ phyaddr
   regs32[0x24 / sizeof(uint32_t)] = (cqds[0] << 16) | sqds[0]; // Admin Queue Entry Num
 #else
+      cqps[0] = 0;
+      sqps[0] = 0;
+      cqds[0] = ACQD;
+      sqds[0] = ASQD;
   qps[0] = new QP(0);
 
   regs64[0x30 / sizeof(uint64_t)] = qps[0]->cq_pa(); // Admin CQ phyaddr
+  //  regs64[0x30 / sizeof(uint64_t)] = v2p((size_t)cqs[0]); // Admin CQ phyaddr
   regs64[0x28 / sizeof(uint64_t)] = qps[0]->sq_pa(); // Admin SQ phyaddr
   regs32[0x24 / sizeof(uint32_t)] = (qps[0]->n_cqe << 16) | qps[0]->n_sqe; // Admin Queue Entry Num
   printf("%p %lx %p %lx\n", qps[0]->get_cqe(0), qps[0]->cq_pa(), qps[0]->get_sqe(0), qps[0]->sq_pa());
@@ -443,11 +451,12 @@ init()
   buf = mmap(NULL, sz, PROT_READ | PROT_WRITE,
             MAP_PRIVATE | MAP_HUGETLB | MAP_ANONYMOUS | MAP_POPULATE, 0, 0);
 
-#if OLD_VERSION
+#if 1 //OLD_VERSION
    // identity
    {
      printf("identity cmd...\n");
-    volatile sqe_t *sqe = &sqs[0][sqps[0]];
+     volatile sqe_t *sqe = qps[0]->get_sqe(0);
+     //volatile sqe_t *sqe = &sqs[0][sqps[0]];
     printf("%p\n", sqe);
     bzero((void*)sqe, sizeof(sqe_t));
     bzero((void*)buf, 4096);
