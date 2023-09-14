@@ -1,9 +1,26 @@
 #include <stdio.h>
 #include <unistd.h>
+#include <stdarg.h>
+
+
+int
+__debug_printf(const char *format, ...)
+{
+  va_list ap;
+  va_start(ap, format);
+  int result = printf(format, ap);
+  va_end(ap);
+  return result;
+}
+
 
 void
 __debug_print(int id, int a, int tid)
 {
+  if (id > 900) {
+    printf("%d %d\n", id, a);
+    return;
+  }
   //sleep(1);
   switch (id) {
   case 1:
@@ -26,6 +43,9 @@ __debug_print(int id, int a, int tid)
     break;
   case 889:
     printf("time2 %d   (%f)\n", a, (double)tid * 1e-9);
+    break;
+  case 59:
+    printf("exec %s\n", (char *)a);
     break;
   }
 }

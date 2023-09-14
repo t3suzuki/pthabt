@@ -3,11 +3,9 @@
 #include <abt.h>
 #include <errno.h>
 #include "real_pthread.h"
+#include "common.h"
 
 
-
-#define N_TH (4)
-#define ULT_N_TH (16*N_TH)
 
 //#define NEW_JOIN (1)
 
@@ -17,6 +15,27 @@ static ABT_pool global_abt_pools[N_TH];
 static unsigned int global_my_tid = 0;
 
 //#define __PTHREAD_VERBOSE__ (1)
+
+#include <execinfo.h>
+
+void
+print_bt()
+{
+  size_t i;
+  void *trace[128];
+  char **ss_trace;
+  size_t size = backtrace(trace, sizeof(trace) / sizeof(trace[0]));
+  ss_trace = backtrace_symbols(trace, size);
+  if (ss_trace == NULL) {
+    /*Failure*/
+    return;
+  }
+  
+  for (i = 0; i < size; i++) {
+    printf("%s\n", ss_trace[i]);
+  }
+  free(ss_trace);
+}
 
 int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
 		   void *(*start_routine) (void *), void *arg) {
@@ -32,6 +51,7 @@ int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
 #if __PTHREAD_VERBOSE__
   printf("%s %d ABT_id %llu @ core %d\n", __func__, __LINE__, abt_id, my_tid % N_TH);
 #endif
+  //print_bt();
   *pth = (pthread_t)abt_thread;
   return 0;
 }
@@ -139,6 +159,13 @@ int pthread_cond_init(pthread_cond_t *cond,
 
 inline static ABT_cond *get_abt_cond(pthread_cond_t *cond)
 {
+  if (0) {
+    int pool_id;
+    uint64_t abt_id;
+    ABT_self_get_last_pool_id(&pool_id);
+    ABT_self_get_thread_id(&abt_id);
+    printf("%d pool_id %d\n", abt_id, pool_id);
+  }
   if (*(my_magic_t *)cond == 0) {
     pthread_cond_init(cond, NULL);
   }
@@ -165,11 +192,14 @@ int pthread_cond_destroy(pthread_cond_t *cond) {
 int pthread_cond_wait(pthread_cond_t *cond,
 		      pthread_mutex_t *mutex) {
 #if __PTHREAD_VERBOSE__
-  printf("%s %d\n", __func__, __LINE__);
+  printf("%s %d %p\n", __func__, __LINE__, cond);
 #endif
   ABT_cond *abt_cond = get_abt_cond(cond);
   ABT_mutex *abt_mutex = get_abt_mutex(mutex);
-  return ABT_cond_wait(*abt_cond, *abt_mutex);
+  //printf("%s %d %p %p\n", __func__, __LINE__, cond, abt_cond);
+  int ret = ABT_cond_wait(*abt_cond, *abt_mutex);
+  //printf("%s %d %p\n", __func__, __LINE__, cond);
+  return ret;
 }
 
 int pthread_cond_broadcast(pthread_cond_t *cond)
@@ -185,12 +215,15 @@ int pthread_cond_timedwait(pthread_cond_t *cond,
 			   pthread_mutex_t *mutex,
 			   const struct timespec *abstime) {
 #if __PTHREAD_VERBOSE__
-  printf("%s %d\n", __func__, __LINE__);
+  printf("%s %d %p\n", __func__, __LINE__, cond);
 #endif
   ABT_cond *abt_cond = get_abt_cond(cond);
   ABT_mutex *abt_mutex = get_abt_mutex(mutex);
+  //printf("%s %d %p %p\n", __func__, __LINE__, cond, abt_cond);
   int ret = ABT_cond_timedwait(*abt_cond, *abt_mutex, abstime);
+  //printf("%s %d %p %d\n", __func__, __LINE__, cond, ret);
   if (ret == ABT_ERR_COND_TIMEDOUT) {
+    //printf("%s timeout\n", __func__, __LINE__);
     return ETIMEDOUT;
   } else {
     return 0;
@@ -201,7 +234,7 @@ int pthread_cond_clockwait(pthread_cond_t *cond,
 			   pthread_mutex_t *mutex,
 			   clockid_t clk,
 			   const struct timespec *abstime) {
-#if 1
+#if __PTHREAD_VERBOSE__
   printf("%s %d\n", __func__, __LINE__);
 #endif
   return pthread_cond_timedwait(cond, mutex, abstime);
@@ -213,7 +246,7 @@ ABT_key *abt_keys[N_KEY];
 
 int pthread_key_create(pthread_key_t *key, void (*destructor)(void*)) {
 #if __PTHREAD_VERBOSE__
-  printf("%s %d %p %p\n", __func__, __LINE__, key);
+  printf("%s %d %p\n", __func__, __LINE__, key);
 #endif
   int i_key;
   for (i_key=0; i_key<N_KEY; i_key++) {
@@ -236,7 +269,7 @@ int pthread_setspecific(pthread_key_t key, const void *value) {
 
 void * pthread_getspecific(pthread_key_t key) {
 #if __PTHREAD_VERBOSE__
-  printf("%s %d %p\n", __func__, __LINE__, key);
+  printf("%s %d\n", __func__, __LINE__);
 #endif
   void *ret;
   ABT_self_get_specific(*(abt_keys[key]), &ret);
@@ -289,7 +322,7 @@ int pthread_rwlock_destory(pthread_rwlock_t *rwlock)
 int pthread_once(pthread_once_t *once_control,
 		 void (*init_routine)(void)) {
 #if __PTHREAD_VERBOSE__
-  printf("%s %d %p\n", __func__, __LINE__, key);
+  printf("%s %d\n", __func__, __LINE__);
 #endif
   int old_val = 0;
   int new_val = 1;
@@ -312,6 +345,13 @@ pthread_t pthread_self(void)
 
 #if 1
 int sched_yield() {
+  {
+    int pool_id;
+    uint64_t abt_id;
+    ABT_self_get_last_pool_id(&pool_id);
+    ABT_self_get_thread_id(&abt_id);
+    printf("%d pool_id %d\n", abt_id, pool_id);
+  }
   return ABT_thread_yield();
 }
 #endif
@@ -340,6 +380,7 @@ mylib_init()
     ABT_xstream_get_main_pools(abt_xstreams[i], 1, &global_abt_pools[i]);
   }
 
+  fflush(0);
   //sleep(1);
   
   __zpoline_init();
