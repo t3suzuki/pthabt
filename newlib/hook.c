@@ -76,7 +76,7 @@ long hook_function(long a1, long a2, long a3,
   if (ret == ABT_SUCCESS && (abt_id >= 0)) {
 
     if (debug_print) {
-	debug_print(1, a1, abt_id);
+      debug_print(1, a1, abt_id);
     }
     if (a1 == 230) {
       if (a3 == 0) {
@@ -158,8 +158,27 @@ long hook_function(long a1, long a2, long a3,
 	hookfd = -1;
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else if (a1 == 270) { //select
-      ABT_thread_yield(); // TODO!!
-      return next_sys_call(a1, a2, a3, a4, a5, (long)NULL, a7);
+      struct timeval *tv = (struct timeval *) a6;
+      struct timespec ts;
+      clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+      ts.tv_sec += tv->tv_sec;
+      ts.tv_nsec += tv->tv_usec * 1000;
+      int ret;
+      while (1) {
+	struct timeval ztv = {.tv_sec = 0, .tv_usec = 0};
+	if (a6) {
+	  struct timespec ts2;
+	  clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
+	  double diff_nsec = (ts2.tv_sec - ts.tv_sec) * 1e9 + (ts2.tv_nsec - ts.tv_nsec);
+	  if (diff_nsec > 0)
+	    return 0;
+	}
+	ret = next_sys_call(a1, a2, a3, a4, a5, (long)&ztv, a7);
+	if (ret) {
+	  return ret;
+	}
+	ABT_thread_yield();
+      }
     } else if (a1 == 0) { // read
       if (a2 == hookfd) {
 	int rank;
@@ -193,6 +212,8 @@ long hook_function(long a1, long a2, long a3,
 	    break;
 	  ABT_thread_yield();
 	}
+	if (debug_print)
+	  debug_print(882, 0, 0);
 	return count;
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
