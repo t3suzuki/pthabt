@@ -11,7 +11,7 @@
 typedef long (*syscall_fn_t)(long, long, long, long, long, long, long);
 static syscall_fn_t next_sys_call = NULL;
 
-extern void (*debug_print)(int, int, int);
+extern void (*debug_print)(long, long, long);
 extern int (*debug_printf)(const char *format, ...);
 void load_debug(void);
 
@@ -78,9 +78,11 @@ long hook_function(long a1, long a2, long a3,
     if (debug_print) {
       debug_print(1, a1, abt_id);
     }
-    if (a1 == 230) {
+    if (a1 == 230) { // sleep
       if (a3 == 0) {
 	struct timespec *ts = (struct timespec *) a4;
+	if (debug_print)
+	  debug_print(871, ts->tv_sec, ts->tv_nsec);
 	struct timespec tsc;
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &tsc);
 	ts->tv_sec += tsc.tv_sec;
@@ -158,14 +160,20 @@ long hook_function(long a1, long a2, long a3,
 	hookfd = -1;
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else if (a1 == 270) { //select
-      struct timeval *tv = (struct timeval *) a6;
+      //printf("%ld %lx %lx %lx %lx\n", a2, a3, a4, a5, a6);
+      struct timespec *ats = (struct timespec *) a6;
+      //printf("%ld %ld\n", ats->tv_sec, ats->tv_nsec);
+      if (debug_print)
+	debug_print(870, ats->tv_sec, ats->tv_nsec);
       struct timespec ts;
       clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
-      ts.tv_sec += tv->tv_sec;
-      ts.tv_nsec += tv->tv_usec * 1000;
+      if (debug_print)
+	debug_print(870, ts.tv_sec, ts.tv_nsec);
+      ts.tv_sec += ats->tv_sec;
+      ts.tv_nsec += ats->tv_nsec;
       int ret;
       while (1) {
-	struct timeval ztv = {.tv_sec = 0, .tv_usec = 0};
+	struct timespec zts = {.tv_sec = 0, .tv_nsec = 0};
 	if (a6) {
 	  struct timespec ts2;
 	  clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
@@ -173,7 +181,7 @@ long hook_function(long a1, long a2, long a3,
 	  if (diff_nsec > 0)
 	    return 0;
 	}
-	ret = next_sys_call(a1, a2, a3, a4, a5, (long)&ztv, a7);
+	ret = next_sys_call(a1, a2, a3, a4, a5, (long)&zts, a7);
 	if (ret) {
 	  return ret;
 	}
@@ -236,6 +244,8 @@ long hook_function(long a1, long a2, long a3,
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
+    } else if (a1 == 186) { // gettid
+      return abt_id;
     } else if (a1 == 18) { // pwrite64
       if (a2 == hookfd) {
 	int rank;
