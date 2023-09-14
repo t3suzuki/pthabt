@@ -178,7 +178,7 @@ char *malloc_2MB()
 }
 
 
-#define QD (8)
+#define QD (512)
 #define AQD (8)
 class QP {
 public:
@@ -463,6 +463,7 @@ main()
   int len = 512;
   int i;
   int j;
+  int cids[16];
 
   //nvme_write2(lba, 1);
   for (j=0; j<16; j++) {
@@ -482,6 +483,31 @@ main()
     }
     printf("%x\n", rbuf[0]);
   }
+
+  for (j=0; j<16; j++) {
+    wbuf[0] = 0x5 + j;
+    lba = j;
+    cids[j] = nvme_write_req(lba, 1, qid, len, wbuf);
+  }
+  for (j=0; j<16; j++) {
+    while (1) {
+      if (nvme_write_check(qid, cids[j]))
+	break;
+    }
+  }
+
+  for (j=0; j<16; j++) {
+    lba = j;
+    cids[j] = nvme_read_req(lba, 1, qid);
+  }
+  for (j=0; j<16; j++) {
+    while (1) {
+      if (nvme_read_check(qid, cids[j], len, rbuf))
+	break;
+    }
+    printf("%x\n", rbuf[0]);
+  }
+
   //nvme_write(0, 1);
   //nvme_read(0, 1);
   return 0;
