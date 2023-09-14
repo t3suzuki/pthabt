@@ -105,13 +105,14 @@ char *malloc_2MB()
 }
 
 
-#define QD (512)
+#define QD (1024)
 #define AQD (8)
 class QP {
 public:
   int n_sqe;
   int n_cqe;
   const int sq_offset = 0x4000;
+  const int chunk_size = 512;
 private:
   int sq_tail;
   int cq_head;
@@ -154,7 +155,7 @@ public:
     return v2p((size_t)sqcq) + sq_offset;
   }
   uint64_t buf4k_pa(int cid) {
-    return _buf4k_pa + 4096 * cid;
+    return _buf4k_pa + chunk_size * cid;
   }
   
   sqe_t *new_sqe(int *ret_cid = nullptr) {
@@ -171,7 +172,7 @@ public:
     *(doorbell) = sq_tail;
   }
   char *get_buf4k(int cid) {
-    return buf4k + 4096 * cid;
+    return buf4k + chunk_size * cid;
   }
   void check_cq() {
     volatile cqe_t *cqe = get_cqe(cq_head);
@@ -275,7 +276,7 @@ nvme_init()
   regs32[0x14 / sizeof(uint32_t)] = cc; // cc disable
   sleep(1);
   csts = regs32[0x1c / sizeof(uint32_t)]; // check csts
-  //printf("csts = %u\n", csts);
+  printf("csts = %u\n", csts);
   
   assert(csts == 0);
 
@@ -369,7 +370,7 @@ nvme_write_check(int qid, int cid)
 }
 
   
-#if 0
+#if 1
 char wbuf[4096];
 char rbuf[4096];
 int
