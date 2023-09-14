@@ -201,7 +201,7 @@ public:
   const int sq_offset = 0x4000;
 private:
   int sq_tail;
-  int cq_tail;
+  int cq_head;
   int cq_phase;
   char *sqcq;
   int done_flag[QD];
@@ -218,7 +218,7 @@ public:
   QP(int qid) {
     _qid = qid;
     sq_tail = 0;
-    cq_tail = 0;
+    cq_head = 0;
     cq_phase = 1;
     n_sqe = (qid == 0) ? 8 : QD;
     n_cqe = (qid == 0) ? 8 : QD;
@@ -251,32 +251,27 @@ public:
     return sqe;
   }
   void sq_doorbell() {
-    printf("sq_tail %d\n", sq_tail);
     asm volatile ("" : : : "memory");
     *(doorbell) = sq_tail;
-    //regs32[0x1000 / sizeof(uint32_t) + 2 * _qid] = sq_tail;
-    printf("sq_tail %d %d\n", sq_tail, _qid);
   }
   char *get_buf(int cid) {
     return buf + 4096 * cid;
   }
   void check_cq() {
-    while (1) {
-      volatile cqe_t *cqe = get_cqe(cq_tail);
-      //printf("%p %lx\n", cqe, v2p((size_t)cqe));
-      printf("cmd done %d sc=%x flag %d\n", cqe->SF.SCT, cqe->SF.SC, cqe->SF.P);
-      if (cqe->SF.P != cq_phase)
-	break;
-      assert(cqe->SF.SC == 0);
-      int cid = cqe->SF.CID;
-      done_flag[cid] = 1;
-      cq_tail++;
-      if (cq_tail == n_cqe) {
-	cq_tail = 0;
-	cq_phase ^= 1;
-      }
+    volatile cqe_t *cqe = get_cqe(cq_head);
+    if (cqe->SF.P == cq_phase) {
+      do {
+	int cid = cqe->SF.CID;
+	done_flag[cid] = 1;
+	cq_head++;
+	if (cq_head == n_cqe) {
+	  cq_head = 0;
+	  cq_phase ^= 1;
+	}
+	cqe = get_cqe(cq_head);
+      } while (cqe->SF.P == cq_phase);
+      *(doorbell+1) = cq_head;
     }
-    *(doorbell+1) = cq_tail;
   }
   void req_and_wait(int cid) {
     sq_doorbell();
@@ -431,8 +426,7 @@ init()
     sqe->CDW0.OPC = 0x6; // identity
     sqe->NSID = 0xffffffff;
     sqe->CDW10 = 0x1;
-    qps[0]->sq_doorbell();
-    sync_cmd(0);
+    qps[0]->req_and_wait(cid);
 
     IdentifyControllerData *idata = (IdentifyControllerData *)qps[0]->get_buf(cid);
     printf("  VID: %4X\n", idata->VID);
@@ -442,25 +436,6 @@ init()
     printf("   FR: %.8s\n", idata->FR);
   }
   
-  // identity
-  {
-    printf("identity cmd...\n");
-    int cid;
-    volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
-    printf("sqe %p\n", sqe);
-    sqe->CDW0.OPC = 0x6; // identity
-    sqe->NSID = 0xffffffff;
-    sqe->CDW10 = 0x1;
-    printf("cid %d\n", cid);
-    qps[0]->req_and_wait(cid);
-
-    IdentifyControllerData *idata = (IdentifyControllerData *)qps[0]->get_buf(cid);
-    printf("  VID: %4X\n", idata->VID);
-    printf("SSVID: %4X\n", idata->SSVID);
-    printf("   SN: %.20s\n", idata->SN);
-    printf("   MN: %.40s\n", idata->MN);
-    printf("   FR: %.8s\n", idata->FR);    
-  }
   exit(1);
 
 
