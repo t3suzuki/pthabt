@@ -422,7 +422,6 @@ init()
     printf("identity cmd...\n");
     int cid;
     volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
-    printf("%p\n", sqe);
     sqe->CDW0.OPC = 0x6; // identity
     sqe->NSID = 0xffffffff;
     sqe->CDW10 = 0x1;
@@ -436,38 +435,32 @@ init()
     printf("   FR: %.8s\n", idata->FR);
   }
   
-  exit(1);
 
-
-#if 0
   // CQ create
   {
-    volatile sqe_t *sqe = &sqs[0][sqps[0]];
-    int qid = 1;
-    bzero((void*)sqe, sizeof(sqe_t));
-    printf("%p\n", sqe);
+    int new_qid = 1;
+    int cid;
+    volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
     sqe->CDW0.OPC = 0x5; // create CQ
-    sqe->PRP1 = (uint64_t) v2p((size_t)cqs[qid]);
-    sqe->CDW10 = (cqds[qid] << 16) | qid;
+    sqe->CDW10 = (qps[new_qid]->n_cqe << 16) | new_qid;
     sqe->CDW11 = 1;
-    
-    sync_cmd(0);
-    printf("CQ create done %d\n", cqds[1]);
+    qps[0]->req_and_wait(cid);
+    printf("CQ create done\n");
   }
 
   // SQ create
   {
-    volatile sqe_t *sqe = &sqs[0][sqps[0]];
-    int qid = 1;
-    bzero((void*)sqe, sizeof(sqe_t));
+    int cid;
+    int new_qid = 1;
+    volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
     sqe->CDW0.OPC = 0x1; // create SQ
-    sqe->PRP1 = (uint64_t) v2p((size_t)sqs[qid]);
-    sqe->CDW10 = (sqds[qid] << 16) | qid;
-    sqe->CDW11 = (qid << 16) | 1; // physically contiguous
-    sync_cmd(0);
+    sqe->CDW10 = (sqds[new_qid] << 16) | new_qid;
+    sqe->CDW11 = (new_qid << 16) | 1; // physically contiguous
+    qps[0]->req_and_wait(cid);
     printf("SQ create done\n");
   }
 
+#if 0
   // get namespaces
   {
     volatile sqe_t *sqe = &sqs[0][sqps[0]];
@@ -572,12 +565,12 @@ main()
 {
   init();
 
-  int qid = 1;
+  /*  int qid = 1;
   int lba = 0;
   int cid;
   int len = 512;
   cid = nvme_write_req(lba, 1, qid, len, wbuf);
-  /*
+
   nvme_write_check(qid, cid);
 
   cid = nvme_read_req(lba, 1, qid);
