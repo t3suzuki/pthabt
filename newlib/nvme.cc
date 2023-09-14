@@ -11,7 +11,7 @@
 #include <assert.h>
 #include <vector>
 
-#define NQ (2)
+#define NQ (4)
 
 static int enable_bus_master(int uio_index)
 {
@@ -250,7 +250,7 @@ public:
     if (cqe->SF.P == cq_phase) {
       do {
 	int cid = cqe->SF.CID;
-	printf("cmd done cid=%d sct=%d sc=%x flag %d\n", cqe->SF.CID, cqe->SF.SCT, cqe->SF.SC, cqe->SF.P);
+	//printf("cmd done cid=%d sct=%d sc=%x flag %d\n", cqe->SF.CID, cqe->SF.SCT, cqe->SF.SC, cqe->SF.P);
 	done_flag[cid] = 1;
 	cq_head++;
 	if (cq_head == n_cqe) {
@@ -268,7 +268,7 @@ public:
       check_cq();
       if (done(cid))
 	break;
-      sleep(1);
+      //sleep(1);
     }
   }
   int done(int cid) {
@@ -279,6 +279,35 @@ public:
 
 QP *qps[NQ];
 
+
+void
+create_qp(int new_qid)
+{
+  // CQ create
+  {
+    int cid;
+    volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
+    sqe->CDW0.OPC = 0x5; // create CQ
+    sqe->PRP1 = qps[new_qid]->cq_pa();
+    sqe->NSID = 0;
+    sqe->CDW10 = (qps[new_qid]->n_cqe << 16) | new_qid;
+    sqe->CDW11 = 1;
+    //printf("%p %d %p %x\n", sqe, cid, sqe->PRP1, sqe->CDW10);
+    qps[0]->req_and_wait(cid);
+  }
+  // SQ create
+  {
+    int cid;
+    volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
+    sqe->CDW0.OPC = 0x1; // create SQ
+    sqe->PRP1 = qps[new_qid]->sq_pa();
+    sqe->NSID = 0;
+    sqe->CDW10 = (qps[new_qid]->n_sqe << 16) | new_qid;
+    sqe->CDW11 = (new_qid << 16) | 1; // physically contiguous
+    qps[0]->req_and_wait(cid);
+  }
+  printf("CQ/SQ create done %d\n", new_qid);
+}
 
 int
 init()
@@ -303,8 +332,8 @@ init()
 
   uint32_t csts;
   uint32_t cc;
-  csts = regs32[0x1c / sizeof(uint32_t)];
-  printf("csts = %u\n", csts);
+  //csts = regs32[0x1c / sizeof(uint32_t)];
+  //printf("csts = %u\n", csts);
 
   /*
   cc = 0x2 << 14;
@@ -318,7 +347,7 @@ init()
   regs32[0x14 / sizeof(uint32_t)] = cc; // cc disable
   sleep(1);
   csts = regs32[0x1c / sizeof(uint32_t)]; // check csts
-  printf("csts = %u\n", csts);
+  //printf("csts = %u\n", csts);
   
   assert(csts == 0);
 
@@ -327,31 +356,22 @@ init()
   regs64[0x30 / sizeof(uint64_t)] = qps[0]->cq_pa(); // Admin CQ phyaddr
   regs64[0x28 / sizeof(uint64_t)] = qps[0]->sq_pa(); // Admin SQ phyaddr
   regs32[0x24 / sizeof(uint32_t)] = (qps[0]->n_cqe << 16) | qps[0]->n_sqe; // Admin Queue Entry Num
-  printf("%p %lx %p %lx\n", qps[0]->get_cqe(0), qps[0]->cq_pa(), qps[0]->get_sqe(0), qps[0]->sq_pa());
+  //printf("%p %lx %p %lx\n", qps[0]->get_cqe(0), qps[0]->cq_pa(), qps[0]->get_sqe(0), qps[0]->sq_pa());
 
   // enable controller.
   cc = 0x460001;
   regs32[0x14 / sizeof(uint32_t)] = cc; // cc enable
   sleep(3);
   csts = regs32[0x1c / sizeof(uint32_t)]; // check csts
-  printf("csts = %u\n", csts);
+  //printf("csts = %u\n", csts);
   assert(csts == 1);
 
-
-  {
-    int iq;
-    for (iq=1; iq<NQ; iq++) {
-      qps[iq] = new QP(iq);
-      //printf("%p %lx %p %lx\n", qps[iq]->get_cqe(0), qps[iq]->cq_pa(), qps[iq]->get_sqe(0), qps[iq]->sq_pa());
-    }
-  }
 
   // identity
   {
     printf("identity cmd...\n");
     int cid;
     volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
-    printf("identity cmd... %p\n", sqe);
     sqe->CDW0.OPC = 0x6; // identity
     sqe->NSID = 0xffffffff;
     sqe->CDW10 = 0x1;
@@ -366,33 +386,15 @@ init()
     printf("   FR: %.8s\n", idata->FR);
   }
 
-  // CQ create
   {
-    int new_qid = 1;
-    int cid;
-    volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
-    sqe->CDW0.OPC = 0x5; // create CQ
-    sqe->PRP1 = qps[new_qid]->cq_pa();
-    sqe->NSID = 0;
-    sqe->CDW10 = (qps[new_qid]->n_cqe << 16) | new_qid;
-    sqe->CDW11 = 1;
-    printf("%p %d %p %x\n", sqe, cid, sqe->PRP1, sqe->CDW10);
-    qps[0]->req_and_wait(cid);
-    printf("CQ create done\n");
+    int iq;
+    for (iq=1; iq<NQ; iq++) {
+      qps[iq] = new QP(iq);
+      create_qp(iq);
+      //printf("%p %lx %p %lx\n", qps[iq]->get_cqe(0), qps[iq]->cq_pa(), qps[iq]->get_sqe(0), qps[iq]->sq_pa());
+    }
   }
-  // SQ create
-  {
-    int cid;
-    int new_qid = 1;
-    volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
-    sqe->CDW0.OPC = 0x1; // create SQ
-    sqe->PRP1 = qps[new_qid]->sq_pa();
-    sqe->NSID = 0;
-    sqe->CDW10 = (qps[new_qid]->n_sqe << 16) | new_qid;
-    sqe->CDW11 = (new_qid << 16) | 1; // physically contiguous
-    qps[0]->req_and_wait(cid);
-    printf("SQ create done\n");
-  }
+
 
   return 0;
 }
@@ -468,14 +470,12 @@ main()
   while (1) {
     if (nvme_write_check(qid, cid))
       break;
-    sleep(1);
   }
   
   cid = nvme_read_req(lba, 1, qid);
   while (1) {
     if (nvme_read_check(qid, cid, len, rbuf))
       break;
-    sleep(1);
   }
   for (i=0; i<4; i++) {
     printf("%x\n", rbuf[i]);
