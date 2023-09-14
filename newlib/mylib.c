@@ -76,6 +76,10 @@ int pthread_join(pthread_t pth, void **retval) {
   return 0;
 }
 
+int pthread_detach(pthread_t pth) {
+  return 0;
+}
+
 
 typedef unsigned int my_magic_t;
 typedef struct {

@@ -6,7 +6,7 @@
 
 
 
-void (*debug_print)(int, int, int) = NULL;
+void (*debug_print)(long, long, long) = NULL;
 int (*debug_printf)(const char *format, ...) = NULL;
 
 void load_debug(void)
