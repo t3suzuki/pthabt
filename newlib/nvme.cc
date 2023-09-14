@@ -512,13 +512,14 @@ init()
 int
 nvme_read_req(uint32_t lba, int num_blk, int qid)
 {
-  int ret_cid;
-  sqe_t *sqe = qps[qid]->new_sqe(&ret_cid);
+  int cid;
+  sqe_t *sqe = qps[qid]->new_sqe(&cid);
+  sqe->PRP1 = qps[qid]->buf4k_pa(cid);
   sqe->CDW0.OPC = 0x2; // read
   sqe->CDW10 = lba;
   sqe->CDW12 = num_blk;
   qps[qid]->sq_doorbell();
-  return ret_cid;
+  return cid;
 }
 
 int
@@ -527,6 +528,7 @@ nvme_write_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
   int cid;
   sqe_t *sqe = qps[qid]->new_sqe(&cid);
   memcpy(qps[qid]->get_buf4k(cid), buf, len);
+  sqe->PRP1 = qps[qid]->buf4k_pa(cid);
   sqe->CDW0.OPC = 0x1; // write
   sqe->CDW10 = lba;
   sqe->CDW12 = num_blk;
@@ -614,8 +616,7 @@ main()
   int len = 512;
   int i;
 
-#if 0
-  nvme_write2(lba, 1);
+  //nvme_write2(lba, 1);
   for (i=0; i<512; i++) {
     wbuf[i] = 0x5a;
   }
@@ -635,6 +636,7 @@ main()
   for (i=0; i<4; i++) {
     printf("%x\n", rbuf[i]);
   }
+#if 0
 #endif
   //nvme_write(0, 1);
   //nvme_read(0, 1);
