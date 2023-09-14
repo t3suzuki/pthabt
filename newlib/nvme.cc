@@ -85,82 +85,6 @@ typedef struct {
   } SF;
 } cqe_t;
 
-typedef struct {
-  uint16_t VID;
-  uint16_t SSVID;
-  char SN[20];
-  char MN[40];
-  // +64
-  char FR[8];
-  uint8_t RAB;
-  uint8_t IEEE[3];
-  uint8_t CMIC;
-  uint8_t MDTS;
-  uint16_t CNTLID;
-  uint32_t VER;
-  uint32_t RTD3R;
-  uint32_t RTD3E;
-  uint32_t OAES;
-  uint32_t CTRATT;
-  uint8_t Reserved0[12];
-  uint8_t FGUID[16];
-  // +128
-  uint8_t Reserved1[112];
-  uint8_t NVMEMI[16];  // Refer to the NVMe Management Interface Spec.
-  // +256
-  uint16_t OACS;
-  uint8_t ACL;
-  uint8_t AERL;
-  uint8_t FRMW;
-  uint8_t LPA;
-  uint8_t ELPE;
-  uint8_t NPSS;
-  uint8_t AVSCC;
-  uint8_t APSTA;
-  uint16_t WCTEMP;
-  uint16_t CCTEMP;
-  uint16_t MTFA;
-  uint32_t HMPRE;
-  uint32_t HMMIN;
-  uint8_t TNVMCAP[16];
-  uint8_t UNVMCAP[16];
-  uint32_t RPMBS;
-  uint16_t EDSTT;
-  uint8_t DSTO;
-  uint8_t FWUG;
-  uint16_t KAS;
-  uint16_t HCTMA;
-  uint16_t MNTMT;
-  uint16_t MXTMT;
-  uint32_t SANICAP;
-  uint8_t Reserved2[180];
-  // +512
-  uint8_t SQES;
-  uint8_t CQES;
-  uint16_t MAXCMD;
-  uint32_t NN;
-  uint16_t ONCS;
-  uint16_t FUSES;
-  uint8_t FNA;
-  uint8_t VWC;
-  uint16_t AWUN;
-  uint16_t AWUPF;
-  uint8_t NVSCC;
-  uint8_t Reserved3;
-  uint16_t ACWU;
-  uint16_t Reserved4;
-  uint32_t SGLS;
-  uint8_t Reserved5[228];
-  char SUBNQN[256];
-  // +1024
-  uint8_t Reserved6[768];
-  uint8_t NVMOF[256];  // Refer to the NVMe over Fabrics spec.
-  // +2048
-  uint8_t PSD[32][32];
-  // +3072
-  uint8_t VENDSPEC[1024];
-} IdentifyControllerData;
-
 static volatile uint32_t *regs32;
 static volatile uint64_t *regs64;
 
@@ -378,13 +302,6 @@ init()
     sqe->CDW10 = 0x1;
     sqe->PRP1 = qps[0]->buf4k_pa(cid);
     qps[0]->req_and_wait(cid);
-
-    IdentifyControllerData *idata = (IdentifyControllerData *)qps[0]->get_buf4k(cid);
-    printf("  VID: %4X\n", idata->VID);
-    printf("SSVID: %4X\n", idata->SSVID);
-    printf("   SN: %.20s\n", idata->SN);
-    printf("   MN: %.40s\n", idata->MN);
-    printf("   FR: %.8s\n", idata->FR);
   }
 
   {
