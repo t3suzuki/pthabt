@@ -11,6 +11,9 @@
 #include <assert.h>
 #include <vector>
 
+extern "C" {
+#include "nvme.h"
+  
 #define NQ (8)
 
 static int enable_bus_master(int uio_index)
@@ -235,7 +238,7 @@ create_qp(int new_qid)
 }
 
 int
-init()
+nvme_init()
 {
   int uio_index = 16;
   
@@ -366,13 +369,13 @@ nvme_write_check(int qid, int cid)
 }
 
   
-
+#if 0
 char wbuf[4096];
 char rbuf[4096];
 int
 main()
 {
-  init();
+  nvme_init();
 
   int qid = 1;
   int lba = 0;
@@ -428,4 +431,7 @@ main()
   //nvme_write(0, 1);
   //nvme_read(0, 1);
   return 0;
+}
+#endif
+
 }

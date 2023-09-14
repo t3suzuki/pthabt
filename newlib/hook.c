@@ -4,6 +4,7 @@
 #include <time.h>
 #include <abt.h>
 #include "real_pthread.h"
+#include "nvme.h"
 
 #define N_HELPER (32)
 
@@ -11,6 +12,7 @@ typedef long (*syscall_fn_t)(long, long, long, long, long, long, long);
 static syscall_fn_t next_sys_call = NULL;
 
 extern void (*debug_print)(int, int, int);
+extern int (*debug_printf)(const char *format, ...);
 void load_debug(void);
 
 typedef struct {
@@ -56,6 +58,8 @@ void do_helper(void *arg) {
   }
 }
 
+
+int hookfd;
 
 long hook_function(long a1, long a2, long a3,
 		   long a4, long a5, long a6,
@@ -138,6 +142,34 @@ long hook_function(long a1, long a2, long a3,
 	}
 	ABT_thread_yield();
       }
+    } else if (a1 == 257) { // openat
+#define MYFILE ("myfile")
+      if (strncmp(MYFILE, (char *)a3, strlen(MYFILE)) == 0) {
+	ret = next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+	hookfd = ret;
+	if (debug_print)
+	  debug_print(884, hookfd, 0);
+	return ret;
+      }
+      return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+    } else if (a1 == 0) { // read
+      if (a2 == hookfd) {
+	int rank;
+	ABT_xstream_self_rank(&rank);
+	int qid = rank + 1;
+	if (debug_print)
+	  debug_print(883, rank, 0);
+	size_t count = a4;
+	int cid = nvme_read_req(0, 1, qid);
+	while (1) {
+	  if (nvme_read_check(qid, cid, count, a3))
+	    break;
+	  ABT_thread_yield();
+	}
+	return count;
+      } else {
+	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+      }
     } else if ((a1 == 1) || // write
 	(a1 == 9) || // mmap
 	(a1 == 12) || // brk
@@ -207,6 +239,9 @@ int __hook_init(long placeholder __attribute__((unused)),
 
   next_sys_call = *((syscall_fn_t *) sys_call_hook_ptr);
   *((syscall_fn_t *) sys_call_hook_ptr) = hook_function;
+
+  nvme_init();
+  
   return 0;
 
 }
