@@ -178,7 +178,7 @@ char *malloc_2MB()
 }
 
 
-#define QD (512)
+#define QD (8)
 #define AQD (8)
 class QP {
 public:
@@ -291,7 +291,7 @@ create_qp(int new_qid)
     sqe->CDW0.OPC = 0x5; // create CQ
     sqe->PRP1 = qps[new_qid]->cq_pa();
     sqe->NSID = 0;
-    sqe->CDW10 = (qps[new_qid]->n_cqe << 16) | new_qid;
+    sqe->CDW10 = ((qps[new_qid]->n_cqe - 1) << 16) | new_qid;
     sqe->CDW11 = 1;
     //printf("%p %d %p %x\n", sqe, cid, sqe->PRP1, sqe->CDW10);
     qps[0]->req_and_wait(cid);
@@ -303,7 +303,7 @@ create_qp(int new_qid)
     sqe->CDW0.OPC = 0x1; // create SQ
     sqe->PRP1 = qps[new_qid]->sq_pa();
     sqe->NSID = 0;
-    sqe->CDW10 = (qps[new_qid]->n_sqe << 16) | new_qid;
+    sqe->CDW10 = ((qps[new_qid]->n_sqe - 1) << 16) | new_qid;
     sqe->CDW11 = (new_qid << 16) | 1; // physically contiguous
     qps[0]->req_and_wait(cid);
   }
@@ -462,27 +462,26 @@ main()
   int cid;
   int len = 512;
   int i;
+  int j;
 
   //nvme_write2(lba, 1);
-  for (i=0; i<512; i++) {
-    wbuf[i] = 0x5a;
+  for (j=0; j<16; j++) {
+    for (i=0; i<512; i++) {
+      wbuf[i] = 0x5a + j;
+    }
+    cid = nvme_write_req(lba, 1, qid, len, wbuf);
+    while (1) {
+      if (nvme_write_check(qid, cid))
+	break;
+    }
+    
+    cid = nvme_read_req(lba, 1, qid);
+    while (1) {
+      if (nvme_read_check(qid, cid, len, rbuf))
+	break;
+    }
+    printf("%x\n", rbuf[0]);
   }
-  cid = nvme_write_req(lba, 1, qid, len, wbuf);
-  while (1) {
-    if (nvme_write_check(qid, cid))
-      break;
-  }
-  
-  cid = nvme_read_req(lba, 1, qid);
-  while (1) {
-    if (nvme_read_check(qid, cid, len, rbuf))
-      break;
-  }
-  for (i=0; i<4; i++) {
-    printf("%x\n", rbuf[i]);
-  }
-#if 0
-#endif
   //nvme_write(0, 1);
   //nvme_read(0, 1);
   return 0;
