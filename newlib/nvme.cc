@@ -163,21 +163,6 @@ typedef struct {
 
 static volatile uint32_t *regs32;
 static volatile uint64_t *regs64;
-static volatile void *buf;
-
-#define ASQD (8)
-#define ACQD (8)
-#define SQD (512)
-#define CQD (512)
-static uint32_t sqps[NQ];
-static uint32_t cqps[NQ];
-static volatile cqe_t *cqs[NQ];
-static volatile sqe_t *sqs[NQ];
-static int cqds[NQ];
-static int sqds[NQ];
-
-
-
 
 char *malloc_2MB()
 {
@@ -295,57 +280,6 @@ public:
 QP *qps[NQ];
 
 
-
-
-void
-sync_cmd(int qid)
-{
-  volatile cqe_t *cqe = qps[0]->get_cqe(0);
-  /*
-  sqps[qid] = (sqps[qid] + 1) % sqds[qid];
-  asm volatile ("" : : : "memory");
-  regs32[0x1000 / sizeof(uint32_t) + 2 * qid] = sqps[qid];
-  */
-
-  printf("flag %d\n", cqe->SF.P);
-  while (1) {
-    if (cqe->SF.P)
-      break;
-    sleep(1);
-  }
-  printf("cmd done %d sc=%x flag %d\n", cqe->SF.SCT, cqe->SF.SC, cqe->SF.P);
-  cqps[qid] = (cqps[qid] + 1) % cqds[qid];
-}
-
-
-
-void
-nvme_flush()
-{
-  int qid = 1;
-  volatile sqe_t *sqe = &sqs[qid][sqps[qid]];
-  bzero((void*)sqe, sizeof(sqe_t));
-  sqe->CDW0.OPC = 0x0; // flush
-  sqe->NSID = 1;
-  sync_cmd(qid);
-}
-
-void
-nvme_read(uint64_t lba, int num_blk)
-{
-  int qid = 1;
-  volatile sqe_t *sqe = &sqs[qid][sqps[qid]];
-  bzero((void*)sqe, sizeof(sqe_t));
-  bzero((void*)buf, 4096);
-  sqe->CDW0.OPC = 0x2; // read
-  sqe->PRP1 = (uint64_t) v2p((size_t)buf);
-  sqe->NSID = 1;
-  sqe->CDW10 = lba & 0xffffffff;
-  sqe->CDW11 = (lba >> 32);
-  sqe->CDW12 = num_blk;
-  sync_cmd(qid);
-}
-
 int
 init()
 {
@@ -388,10 +322,6 @@ init()
   
   assert(csts == 0);
 
-  cqps[0] = 0;
-  sqps[0] = 0;
-  cqds[0] = ACQD;
-  sqds[0] = ASQD;
   qps[0] = new QP(0);
   
   regs64[0x30 / sizeof(uint64_t)] = qps[0]->cq_pa(); // Admin CQ phyaddr
@@ -404,7 +334,7 @@ init()
   regs32[0x14 / sizeof(uint32_t)] = cc; // cc enable
   sleep(3);
   csts = regs32[0x1c / sizeof(uint32_t)]; // check csts
-  printf("csts %u\n", csts);
+  printf("csts = %u\n", csts);
   assert(csts == 1);
 
 
@@ -412,14 +342,9 @@ init()
     int iq;
     for (iq=1; iq<NQ; iq++) {
       qps[iq] = new QP(iq);
-      printf("%p %lx %p %lx\n", qps[iq]->get_cqe(0), qps[iq]->cq_pa(), qps[iq]->get_sqe(0), qps[iq]->sq_pa());
+      //printf("%p %lx %p %lx\n", qps[iq]->get_cqe(0), qps[iq]->cq_pa(), qps[iq]->get_sqe(0), qps[iq]->sq_pa());
     }
   }
-
-
-  const int sz = 2*1024*1024;
-  buf = mmap(NULL, sz, PROT_READ | PROT_WRITE,
-	     MAP_PRIVATE | MAP_HUGETLB | MAP_ANONYMOUS | MAP_POPULATE, 0, 0);
 
   // identity
   {
@@ -440,22 +365,6 @@ init()
     printf("   MN: %.40s\n", idata->MN);
     printf("   FR: %.8s\n", idata->FR);
   }
-
-
-
-  if (0) {
-    volatile sqe_t *sqe = &sqs[0][sqps[0]];
-    int qid = 1;
-    bzero((void*)sqe, sizeof(sqe_t));
-    printf("%p\n", sqe);
-     sqe->CDW0.OPC = 0x5; // create CQ
-    sqe->PRP1 = (uint64_t) v2p((size_t)cqs[qid]);
-    sqe->CDW10 = (cqds[qid] << 16) | qid;
-     sqe->CDW11 = 1;
-
-    sync_cmd(0);
-    printf("CQ create done %d\n", cqds[1]);
-   }
 
   // CQ create
   {
@@ -485,27 +394,6 @@ init()
     printf("SQ create done\n");
   }
 
-#if 0  
-
-  // get namespaces
-  {
-    volatile sqe_t *sqe = &sqs[0][sqps[0]];
-    bzero((void*)sqe, sizeof(sqe_t));
-    sqe->CDW0.OPC = 0x6; // identity
-    bzero((void*)buf, 4096);
-    sqe->PRP1 = (uint64_t) v2p((size_t)buf);
-    sqe->NSID = 0;
-    sqe->CDW10 = 2;
-    sync_cmd(0);
-
-    uint32_t *id_list = (uint32_t *)buf;
-    int i;
-    for (i=0; i<1024; i++) {
-      if (id_list[i] == 0) break;
-      printf("namespace %d\n", id_list[i]);
-    }
-  }
-#endif
   return 0;
 }
 
@@ -558,50 +446,6 @@ nvme_write_check(int qid, int cid)
 }
 
   
-void
-nvme_read(int qid, uint64_t lba, int num_blk)
-{
-  volatile sqe_t *sqe = &sqs[qid][sqps[qid]];
-  bzero((void*)sqe, sizeof(sqe_t));
-  sqe->PRP1 = (uint64_t) v2p((size_t)buf);
-  sqe->NSID = 1;
-  sqe->CDW10 = lba & 0xffffffff;
-  sqe->CDW11 = (lba >> 32);
-  sqe->CDW12 = num_blk;
-  sync_cmd(qid);
-}
-
-
-
-void
-nvme_write2(uint64_t lba, int num_blk)
-{
-  int qid = 1;
-  int cid;
-  sqe_t *sqe = qps[qid]->new_sqe(&cid);
-  sqe->CDW0.OPC = 0x1; // write
-  sqe->PRP1 = (uint64_t) v2p((size_t)buf);
-  sqe->NSID = 1;
-  sqe->CDW10 = lba & 0xffffffff;
-  sqe->CDW11 = (lba >> 32);
-  sqe->CDW12 = num_blk;
-  qps[qid]->req_and_wait(cid);
-}
-
-void
-nvme_write(uint64_t lba, int num_blk)
-{
-  volatile sqe_t *sqe = &sqs[1][sqps[1]];
-  bzero((void*)sqe, sizeof(sqe_t));
-  sqe->CDW0.OPC = 0x1; // write
-  sqe->PRP1 = (uint64_t) v2p((size_t)buf);
-  sqe->NSID = 1;
-  sqe->CDW10 = lba & 0xffffffff;
-  sqe->CDW11 = (lba >> 32);
-  sqe->CDW12 = num_blk;
-  sync_cmd(1);
-}
-
 
 char wbuf[4096];
 char rbuf[4096];
