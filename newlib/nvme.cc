@@ -206,7 +206,8 @@ private:
   char *sqcq;
   int done_flag[QD];
   volatile uint32_t *doorbell;
-  char *buf;
+  char *buf4k;
+  uint64_t _buf4k_pa;
   int _qid;
 public:
   inline cqe_t *get_cqe(int index) {
@@ -223,13 +224,12 @@ public:
     n_sqe = (qid == 0) ? 8 : QD;
     n_cqe = (qid == 0) ? 8 : QD;
     sqcq = malloc_2MB();
-    buf = malloc_2MB();
-    uint64_t buf_pa = v2p((size_t)buf);
+    buf4k = malloc_2MB();
+    _buf4k_pa = v2p((size_t)buf4k);
     for (int i=0; i<n_sqe; i++) {
       sqe_t *sqe = get_sqe(i);
       bzero((void*)sqe, sizeof(sqe_t));
       sqe->NSID = 1;
-      sqe->PRP1 = buf_pa + 4096 * i;
       sqe->CDW0.CID = i;
     }
     doorbell = &regs32[0x1000 / sizeof(uint32_t) + 2 * qid];
@@ -239,6 +239,9 @@ public:
   }
   uint64_t sq_pa() {
     return v2p((size_t)sqcq) + sq_offset;
+  }
+  uint64_t buf4k_pa(int cid) {
+    return _buf4k_pa + 4096 * cid;
   }
   
   sqe_t *new_sqe(int *ret_cid = nullptr) {
@@ -254,14 +257,15 @@ public:
     asm volatile ("" : : : "memory");
     *(doorbell) = sq_tail;
   }
-  char *get_buf(int cid) {
-    return buf + 4096 * cid;
+  char *get_buf4k(int cid) {
+    return buf4k + 4096 * cid;
   }
   void check_cq() {
     volatile cqe_t *cqe = get_cqe(cq_head);
     if (cqe->SF.P == cq_phase) {
       do {
 	int cid = cqe->SF.CID;
+	printf("cmd done cid=%d sct=%d sc=%x flag %d\n", cqe->SF.CID, cqe->SF.SCT, cqe->SF.SC, cqe->SF.P);
 	done_flag[cid] = 1;
 	cq_head++;
 	if (cq_head == n_cqe) {
@@ -408,33 +412,50 @@ init()
     int iq;
     for (iq=1; iq<NQ; iq++) {
       qps[iq] = new QP(iq);
+      printf("%p %lx %p %lx\n", qps[iq]->get_cqe(0), qps[iq]->cq_pa(), qps[iq]->get_sqe(0), qps[iq]->sq_pa());
     }
-
   }
 
 
   const int sz = 2*1024*1024;
   buf = mmap(NULL, sz, PROT_READ | PROT_WRITE,
-            MAP_PRIVATE | MAP_HUGETLB | MAP_ANONYMOUS | MAP_POPULATE, 0, 0);
+	     MAP_PRIVATE | MAP_HUGETLB | MAP_ANONYMOUS | MAP_POPULATE, 0, 0);
 
   // identity
   {
     printf("identity cmd...\n");
     int cid;
     volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
+    printf("identity cmd... %p\n", sqe);
     sqe->CDW0.OPC = 0x6; // identity
     sqe->NSID = 0xffffffff;
     sqe->CDW10 = 0x1;
+    sqe->PRP1 = qps[0]->buf4k_pa(cid);
     qps[0]->req_and_wait(cid);
 
-    IdentifyControllerData *idata = (IdentifyControllerData *)qps[0]->get_buf(cid);
+    IdentifyControllerData *idata = (IdentifyControllerData *)qps[0]->get_buf4k(cid);
     printf("  VID: %4X\n", idata->VID);
     printf("SSVID: %4X\n", idata->SSVID);
     printf("   SN: %.20s\n", idata->SN);
     printf("   MN: %.40s\n", idata->MN);
     printf("   FR: %.8s\n", idata->FR);
   }
-  
+
+
+
+  if (0) {
+    volatile sqe_t *sqe = &sqs[0][sqps[0]];
+    int qid = 1;
+    bzero((void*)sqe, sizeof(sqe_t));
+    printf("%p\n", sqe);
+     sqe->CDW0.OPC = 0x5; // create CQ
+    sqe->PRP1 = (uint64_t) v2p((size_t)cqs[qid]);
+    sqe->CDW10 = (cqds[qid] << 16) | qid;
+     sqe->CDW11 = 1;
+
+    sync_cmd(0);
+    printf("CQ create done %d\n", cqds[1]);
+   }
 
   // CQ create
   {
@@ -442,25 +463,30 @@ init()
     int cid;
     volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
     sqe->CDW0.OPC = 0x5; // create CQ
+    sqe->PRP1 = qps[new_qid]->cq_pa();
+    sqe->NSID = 0;
     sqe->CDW10 = (qps[new_qid]->n_cqe << 16) | new_qid;
     sqe->CDW11 = 1;
+    printf("%p %d %p %x\n", sqe, cid, sqe->PRP1, sqe->CDW10);
     qps[0]->req_and_wait(cid);
     printf("CQ create done\n");
   }
-
   // SQ create
   {
     int cid;
     int new_qid = 1;
     volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
     sqe->CDW0.OPC = 0x1; // create SQ
-    sqe->CDW10 = (sqds[new_qid] << 16) | new_qid;
+    sqe->PRP1 = qps[new_qid]->sq_pa();
+    sqe->NSID = 0;
+    sqe->CDW10 = (qps[new_qid]->n_sqe << 16) | new_qid;
     sqe->CDW11 = (new_qid << 16) | 1; // physically contiguous
     qps[0]->req_and_wait(cid);
     printf("SQ create done\n");
   }
 
-#if 0
+#if 0  
+
   // get namespaces
   {
     volatile sqe_t *sqe = &sqs[0][sqps[0]];
@@ -500,7 +526,7 @@ nvme_write_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
 {
   int cid;
   sqe_t *sqe = qps[qid]->new_sqe(&cid);
-  memcpy(qps[qid]->get_buf(cid), buf, len);
+  memcpy(qps[qid]->get_buf4k(cid), buf, len);
   sqe->CDW0.OPC = 0x1; // write
   sqe->CDW10 = lba;
   sqe->CDW12 = num_blk;
@@ -513,7 +539,7 @@ nvme_read_check(int qid, int cid, int len, char *buf)
 {
   qps[qid]->check_cq();
   if (qps[qid]->done(cid)) {
-    memcpy(buf, qps[qid]->get_buf(cid), len);
+    memcpy(buf, qps[qid]->get_buf4k(cid), len);
     return 1;
   }
   return 0;
@@ -543,6 +569,23 @@ nvme_read(int qid, uint64_t lba, int num_blk)
   sync_cmd(qid);
 }
 
+
+
+void
+nvme_write2(uint64_t lba, int num_blk)
+{
+  int qid = 1;
+  int cid;
+  sqe_t *sqe = qps[qid]->new_sqe(&cid);
+  sqe->CDW0.OPC = 0x1; // write
+  sqe->PRP1 = (uint64_t) v2p((size_t)buf);
+  sqe->NSID = 1;
+  sqe->CDW10 = lba & 0xffffffff;
+  sqe->CDW11 = (lba >> 32);
+  sqe->CDW12 = num_blk;
+  qps[qid]->req_and_wait(cid);
+}
+
 void
 nvme_write(uint64_t lba, int num_blk)
 {
@@ -565,18 +608,34 @@ main()
 {
   init();
 
-  /*  int qid = 1;
+  int qid = 1;
   int lba = 0;
   int cid;
   int len = 512;
+  int i;
+
+#if 0
+  nvme_write2(lba, 1);
+  for (i=0; i<512; i++) {
+    wbuf[i] = 0x5a;
+  }
   cid = nvme_write_req(lba, 1, qid, len, wbuf);
-
-  nvme_write_check(qid, cid);
-
-  cid = nvme_read_req(lba, 1, qid);
-  nvme_read_check(qid, cid, len, rbuf);
-  */
+  while (1) {
+    if (nvme_write_check(qid, cid))
+      break;
+    sleep(1);
+  }
   
+  cid = nvme_read_req(lba, 1, qid);
+  while (1) {
+    if (nvme_read_check(qid, cid, len, rbuf))
+      break;
+    sleep(1);
+  }
+  for (i=0; i<4; i++) {
+    printf("%x\n", rbuf[i]);
+  }
+#endif
   //nvme_write(0, 1);
   //nvme_read(0, 1);
   return 0;
