@@ -59,7 +59,8 @@ void do_helper(void *arg) {
 }
 
 
-int hookfd;
+int hookfd = -1;
+size_t cur_lba = 0;
 
 long hook_function(long a1, long a2, long a3,
 		   long a4, long a5, long a6,
@@ -152,6 +153,13 @@ long hook_function(long a1, long a2, long a3,
 	return ret;
       }
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+    } else if (a1 == 3) { // close
+      if (a2 == hookfd)
+	hookfd = -1;
+      return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+    } else if (a1 == 270) { //select
+      ABT_thread_yield(); // TODO!!
+      return next_sys_call(a1, a2, a3, a4, a5, (long)NULL, a7);
     } else if (a1 == 0) { // read
       if (a2 == hookfd) {
 	int rank;
@@ -197,7 +205,7 @@ long hook_function(long a1, long a2, long a3,
 	if (debug_print)
 	  debug_print(883, rank, 0);
 	size_t count = a4;
-	int cid = nvme_write_req(0, 1, qid, count, a3);
+	int cid = nvme_write_req(cur_lba++, 1, qid, count, a3);
 	while (1) {
 	  if (nvme_write_check(qid, cid))
 	    break;
