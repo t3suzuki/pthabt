@@ -11,7 +11,7 @@
 #include <assert.h>
 #include <vector>
 
-#define NQ (4)
+#define NQ (8)
 
 static int enable_bus_master(int uio_index)
 {
@@ -179,6 +179,7 @@ char *malloc_2MB()
 
 
 #define QD (512)
+#define AQD (8)
 class QP {
 public:
   int n_sqe;
@@ -206,8 +207,8 @@ public:
     sq_tail = 0;
     cq_head = 0;
     cq_phase = 1;
-    n_sqe = (qid == 0) ? 8 : QD;
-    n_cqe = (qid == 0) ? 8 : QD;
+    n_sqe = (qid == 0) ? AQD : QD;
+    n_cqe = (qid == 0) ? AQD : QD;
     sqcq = malloc_2MB();
     buf4k = malloc_2MB();
     _buf4k_pa = v2p((size_t)buf4k);
@@ -355,7 +356,7 @@ init()
   
   regs64[0x30 / sizeof(uint64_t)] = qps[0]->cq_pa(); // Admin CQ phyaddr
   regs64[0x28 / sizeof(uint64_t)] = qps[0]->sq_pa(); // Admin SQ phyaddr
-  regs32[0x24 / sizeof(uint32_t)] = (qps[0]->n_cqe << 16) | qps[0]->n_sqe; // Admin Queue Entry Num
+  regs32[0x24 / sizeof(uint32_t)] = ((qps[0]->n_cqe - 1) << 16) | (qps[0]->n_sqe - 1); // Admin Queue Entry Num
   //printf("%p %lx %p %lx\n", qps[0]->get_cqe(0), qps[0]->cq_pa(), qps[0]->get_sqe(0), qps[0]->sq_pa());
 
   // enable controller.
