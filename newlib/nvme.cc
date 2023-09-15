@@ -11,6 +11,8 @@
 #include <assert.h>
 #include <vector>
 
+extern void (*debug_print)(long, long, long);
+
 extern "C" {
 #include "nvme.h"
   
@@ -178,8 +180,14 @@ public:
     volatile cqe_t *cqe = get_cqe(cq_head);
     if (cqe->SF.P == cq_phase) {
       do {
-	int cid = cqe->SF.CID;
-	//printf("cmd done cid=%d sct=%d sc=%x flag %d\n", cqe->SF.CID, cqe->SF.SCT, cqe->SF.SC, cqe->SF.P);
+	int cid = cqe->SF.CID & 0xff;
+	/*
+	int tmp = cqe->SF.CID >> 8;
+	printf("cmd done cid=%d sct=%d sc=%x flag %d\n", cid, cqe->SF.SCT, cqe->SF.SC, cqe->SF.P);
+	printf("cmd done sqhd=%d %d\n",  cqe->SQHD, cqe->SQID);
+	printf("buf4k(cid)[0]=%d\n", ((unsigned char *)get_buf4k(cid))[0]);
+	printf("lba lower 8-bits %d\n", tmp);
+	*/
 	done_flag[cid] = 1;
 	cq_head++;
 	if (cq_head == n_cqe) {
@@ -326,12 +334,36 @@ nvme_read_req(uint32_t lba, int num_blk, int qid)
 {
   int cid;
   sqe_t *sqe = qps[qid]->new_sqe(&cid);
+  //qps[qid]->get_buf4k(cid)[0] = 0xff;
+  //bzero(sqe, sizeof(sqe_t));
   sqe->PRP1 = qps[qid]->buf4k_pa(cid);
   sqe->CDW0.OPC = 0x2; // read
+  //sqe->NSID = 1;
   sqe->CDW10 = lba;
-  sqe->CDW12 = num_blk;
+  sqe->CDW12 = num_blk - 1;
+  //sqe->CDW0.CID = ((lba & 0xff) << 8) | cid;
+  //if (debug_print)
+  //debug_print(520, lba, cid);
+  //printf("read_req qid = %d cid = %d lba = %d(%d)  %p %p\n", qid, cid, lba, lba & 0xff,sqe, qps[qid]->get_buf4k(cid));
   qps[qid]->sq_doorbell();
   return cid;
+}
+
+int
+nvme_read_check(int qid, int cid, int len, char *buf)
+{
+  unsigned char c = qps[qid]->get_buf4k(cid)[0];
+  qps[qid]->check_cq();
+  if (qps[qid]->done(cid)) {
+    memcpy(buf, qps[qid]->get_buf4k(cid), len);
+    //printf("read_cmp qid = %d cid = %d buf[0]=%d %d %p buf4k[0]=%d->%d\n", qid, cid, ((unsigned char*)buf)[0], len, qps[qid]->get_buf4k(cid), c, (unsigned char)(qps[qid]->get_buf4k(cid)[0]));
+    if (debug_print) {
+      debug_print(521, cid, -1);
+      debug_print(522, ((unsigned int*)buf)[0], ((unsigned int*)(qps[qid]->get_buf4k(cid)))[0]);
+    }
+    return 1;
+  }
+  return 0;
 }
 
 int
@@ -343,20 +375,9 @@ nvme_write_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
   sqe->PRP1 = qps[qid]->buf4k_pa(cid);
   sqe->CDW0.OPC = 0x1; // write
   sqe->CDW10 = lba;
-  sqe->CDW12 = num_blk;
+  sqe->CDW12 = num_blk - 1;
   qps[qid]->sq_doorbell();
   return cid;
-}
-
-int
-nvme_read_check(int qid, int cid, int len, char *buf)
-{
-  qps[qid]->check_cq();
-  if (qps[qid]->done(cid)) {
-    memcpy(buf, qps[qid]->get_buf4k(cid), len);
-    return 1;
-  }
-  return 0;
 }
 
 int

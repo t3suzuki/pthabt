@@ -20,7 +20,7 @@ void worker(void *a)
   char *rbuf = aligned_alloc(4096, 512);
   int i;
   int n;
-#if 0
+#if 1
   for (i=0; i<128; i++) {
     wbuf[i] = i+0x7+tid;
   }
