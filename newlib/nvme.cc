@@ -17,7 +17,9 @@ extern "C" {
 #include "nvme.h"
   
 #define NQ (8)
-
+#define QD (1024)
+#define AQD (8)
+  
 static int enable_bus_master(int uio_index)
 {
   char path[256];
@@ -106,9 +108,13 @@ char *malloc_2MB()
   return buf;
 }
 
+  typedef struct {
+    int cid;
+    int done;
+    int len;
+    char *rbuf;
+  } req_t;
 
-#define QD (1024)
-#define AQD (8)
 class QP {
 public:
   int n_sqe;
@@ -117,6 +123,7 @@ public:
   const int chunk_size = 512;
 private:
   int sq_tail;
+  //int sq_head;
   int cq_head;
   int cq_phase;
   char *sqcq;
@@ -126,6 +133,8 @@ private:
   uint64_t _buf4k_pa;
   int _qid;
 public:
+  void *rbuf[QD];
+  int len[QD];
   inline cqe_t *get_cqe(int index) {
     return (cqe_t *)(sqcq + 0x0) + index;
   }
@@ -135,6 +144,7 @@ public:
   QP(int qid) {
     _qid = qid;
     sq_tail = 0;
+    //sq_head = 0;
     cq_head = 0;
     cq_phase = 1;
     n_sqe = (qid == 0) ? AQD : QD;
@@ -142,6 +152,9 @@ public:
     sqcq = malloc_2MB();
     buf4k = malloc_2MB();
     _buf4k_pa = v2p((size_t)buf4k);
+    for (int i=0; i<QD; i++) {
+      done_flag[i] = 2;
+    }
     for (int i=0; i<n_sqe; i++) {
       sqe_t *sqe = get_sqe(i);
       bzero((void*)sqe, sizeof(sqe_t));
@@ -159,14 +172,21 @@ public:
   uint64_t buf4k_pa(int cid) {
     return _buf4k_pa + chunk_size * cid;
   }
-  
   sqe_t *new_sqe(int *ret_cid = nullptr) {
     sqe_t *sqe = get_sqe(sq_tail);
+    int new_sq_tail = (sq_tail + 1) % n_sqe;
+    if (done_flag[sq_tail] == 0) {
+      //printf("block %d %d\n", new_sq_tail, cq_head);
+      while (done_flag[sq_tail] == 0) {
+	check_cq();
+      }
+    }
     done_flag[sq_tail] = 0;
     if (ret_cid) {
       *ret_cid = sq_tail;
     }
-    sq_tail = (sq_tail + 1) % n_sqe;
+    //printf("new_sqe %d %d\n", new_sq_tail, cq_head);
+    sq_tail = new_sq_tail;
     return sqe;
   }
   void sq_doorbell() {
@@ -181,13 +201,16 @@ public:
     if (cqe->SF.P == cq_phase) {
       do {
 	int cid = cqe->SF.CID;
+	//printf("cmd done cid = %d sct=%d sc=%x flag %d\n", cid, cqe->SF.SCT, cqe->SF.SC, cqe->SF.P);
 	/*
 	int tmp = cqe->SF.CID >> 8;
-	printf("cmd done cid=%d sct=%d sc=%x flag %d\n", cid, cqe->SF.SCT, cqe->SF.SC, cqe->SF.P);
 	printf("cmd done sqhd=%d %d\n",  cqe->SQHD, cqe->SQID);
 	printf("buf4k(cid)[0]=%d\n", ((unsigned char *)get_buf4k(cid))[0]);
 	printf("lba lower 8-bits %d\n", tmp);
 	*/
+	//sq_head = cqe->SQHD;
+	if (rbuf[cid])
+	  memcpy(rbuf[cid], get_buf4k(cid), len[cid]);
 	done_flag[cid] = 1;
 	cq_head++;
 	if (cq_head == n_cqe) {
@@ -209,7 +232,7 @@ public:
     }
   }
   int done(int cid) {
-    return done_flag[cid];
+    return (done_flag[cid] == 1);
   }
 };
 
@@ -330,7 +353,7 @@ nvme_init()
 }
 
 int
-nvme_read_req(uint32_t lba, int num_blk, int qid)
+nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
 {
   int cid;
   sqe_t *sqe = qps[qid]->new_sqe(&cid);
@@ -345,18 +368,21 @@ nvme_read_req(uint32_t lba, int num_blk, int qid)
   //if (debug_print)
   //debug_print(520, lba, cid);
   //printf("read_req qid = %d cid = %d lba = %d(%d)  %p %p\n", qid, cid, lba, lba & 0xff,sqe, qps[qid]->get_buf4k(cid));
+  //printf("read_req qid = %d cid = %d lba = %d\n", qid, cid, lba);
+  qps[qid]->rbuf[cid] = buf;
+  qps[qid]->len[cid] = len;
   qps[qid]->sq_doorbell();
   return cid;
 }
 
 int
-nvme_read_check(int qid, int cid, int len, char *buf)
+nvme_read_check(int qid, int cid)
 {
   unsigned char c = qps[qid]->get_buf4k(cid)[0];
   qps[qid]->check_cq();
   if (qps[qid]->done(cid)) {
-    memcpy(buf, qps[qid]->get_buf4k(cid), len);
     //printf("read_cmp qid = %d cid = %d buf[0]=%d %d %p buf4k[0]=%d->%d\n", qid, cid, ((unsigned char*)buf)[0], len, qps[qid]->get_buf4k(cid), c, (unsigned char)(qps[qid]->get_buf4k(cid)[0]));
+    //printf("read_cmp qid = %d cid = %d %d\n", qid, cid, len);    
     /*
     if (debug_print) {
       debug_print(521, cid, -1);
@@ -379,6 +405,8 @@ nvme_write_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
   sqe->CDW10 = lba;
   sqe->CDW12 = num_blk - 1;
   //printf("%s %d lba=%d num_blk=%d qid=%d len=%d cid=%d\n", __func__, __LINE__, lba, num_blk, qid, len, cid);
+  qps[qid]->rbuf[cid] = NULL;
+  qps[qid]->len[cid] = 0;
   qps[qid]->sq_doorbell();
   return cid;
 }
@@ -422,9 +450,9 @@ main()
 	break;
     }
     
-    cid = nvme_read_req(lba, 1, qid);
+    cid = nvme_read_req(lba, 1, qid, len, rbuf);
     while (1) {
-      if (nvme_read_check(qid, cid, len, rbuf))
+      if (nvme_read_check(qid, cid))
 	break;
     }
     printf("%x\n", rbuf[0]);
@@ -444,11 +472,11 @@ main()
 
   for (j=0; j<16; j++) {
     lba = j;
-    cids[j] = nvme_read_req(lba, 1, qid);
+    cids[j] = nvme_read_req(lba, 1, qid, len, rbuf);
   }
   for (j=0; j<16; j++) {
     while (1) {
-      if (nvme_read_check(qid, cids[j], len, rbuf))
+      if (nvme_read_check(qid, cids[j]))
 	break;
     }
     printf("%x\n", rbuf[0]);
