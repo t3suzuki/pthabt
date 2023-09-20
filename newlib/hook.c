@@ -59,7 +59,11 @@ void do_helper(void *arg) {
 }
 
 
+#define MAX_HOOKFD (256)
 int hookfd = -1;
+int hookfds[MAX_HOOKFD];
+//const int lba_file_offset = 2ULL * 1024 * 1024 * 1024 / 512;
+const int lba_file_offset = 0;
 size_t cur_lba = 0;
 
 long hook_function(long a1, long a2, long a3,
@@ -149,15 +153,17 @@ long hook_function(long a1, long a2, long a3,
 #define MYFILE ("myfile")
       if (strncmp(MYFILE, (char *)a3, strlen(MYFILE)) == 0) {
 	ret = next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-	hookfd = ret;
+	if (ret < MAX_HOOKFD) {
+	  hookfds[ret] = 1;
+	}
 	if (debug_print)
-	  debug_print(884, hookfd, 0);
+	  debug_print(884, ret, 0);
 	return ret;
       }
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else if (a1 == 3) { // close
-      if (a2 == hookfd)
-	hookfd = -1;
+      if (hookfds[a2] == 1)
+	hookfds[a2] = 0;
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else if (a1 == 270) { //select
       //printf("%ld %lx %lx %lx %lx\n", a2, a3, a4, a5, a6);
@@ -188,16 +194,16 @@ long hook_function(long a1, long a2, long a3,
 	ABT_thread_yield();
       }
     } else if (a1 == 0) { // read
-      if (a2 == hookfd) {
+      if (hookfds[a2]) {
 	int rank;
 	ABT_xstream_self_rank(&rank);
 	int qid = rank + 1;
 	if (debug_print)
 	  debug_print(883, rank, 0);
 	size_t count = a4;
-	int cid = nvme_read_req(0, 1, qid);
+	int cid = nvme_read_req(0, 1, qid, count, a3);
 	while (1) {
-	  if (nvme_read_check(qid, cid, count, a3))
+	  if (nvme_read_check(qid, cid))
 	    break;
 	  ABT_thread_yield();
 	}
@@ -206,7 +212,7 @@ long hook_function(long a1, long a2, long a3,
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
     } else if (a1 == 17) { // pread64
-      if (a2 == hookfd) {
+      if (hookfds[a2]) {
 	int rank;
 	ABT_xstream_self_rank(&rank);
 	int qid = rank + 1;
@@ -214,9 +220,9 @@ long hook_function(long a1, long a2, long a3,
 	  debug_print(883, rank, 0);
 	size_t count = a4;
 	loff_t pos = a5;
-	int cid = nvme_read_req(pos / 512, 1, qid);
+	int cid = nvme_read_req(pos / 512 + a2 * lba_file_offset, 1, qid, count, a3);
 	while (1) {
-	  if (nvme_read_check(qid, cid, count, a3))
+	  if (nvme_read_check(qid, cid))
 	    break;
 	  ABT_thread_yield();
 	}
@@ -227,14 +233,14 @@ long hook_function(long a1, long a2, long a3,
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
     } else if (a1 == 1) { // write
-      if (a2 == hookfd) {
+      if (hookfds[a2]) {
 	int rank;
 	ABT_xstream_self_rank(&rank);
 	int qid = rank + 1;
 	if (debug_print)
 	  debug_print(883, rank, 0);
 	size_t count = a4;
-	int cid = nvme_write_req(cur_lba++, 1, qid, count, a3);
+	int cid = nvme_write_req(cur_lba++ + a2 * lba_file_offset, 1, qid, count, a3);
 	while (1) {
 	  if (nvme_write_check(qid, cid))
 	    break;
@@ -247,7 +253,7 @@ long hook_function(long a1, long a2, long a3,
     } else if (a1 == 186) { // gettid
       return abt_id;
     } else if (a1 == 18) { // pwrite64
-      if (a2 == hookfd) {
+      if (hookfds[a2]) {
 	int rank;
 	ABT_xstream_self_rank(&rank);
 	int qid = rank + 1;
@@ -255,7 +261,7 @@ long hook_function(long a1, long a2, long a3,
 	  debug_print(883, rank, 0);
 	size_t count = a4;
 	loff_t pos = a5;
-	int cid = nvme_write_req(pos / 512, 1, qid, count, a3);
+	int cid = nvme_write_req(pos / 512 + a2 * lba_file_offset, 1, qid, count, a3);
 	while (1) {
 	  if (nvme_write_check(qid, cid))
 	    break;
