@@ -12,6 +12,7 @@ typedef long (*syscall_fn_t)(long, long, long, long, long, long, long);
 static syscall_fn_t next_sys_call = NULL;
 
 extern void (*debug_print)(long, long, long);
+extern void (*debug_print4)(long, long, long, long, long);
 extern int (*debug_printf)(const char *format, ...);
 void load_debug(void);
 
@@ -59,6 +60,20 @@ void do_helper(void *arg) {
 }
 
 
+int openat_file(char *filename)
+{
+#if 0
+#define MYFILE ("myfile")
+  return (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
+#else
+#define MYDIR ("/tmp/myfile4/")
+#define MYSUFFIX (".sst")  
+  return ((strncmp(MYDIR, filename, strlen(MYDIR)) == 0) &&
+	  (strncmp(MYSUFFIX, filename + strlen(MYDIR) + 6, strlen(MYSUFFIX)) == 0));
+#endif
+}
+
+
 #define MAX_HOOKFD (256)
 int hookfd = -1;
 int hookfds[MAX_HOOKFD];
@@ -80,7 +95,8 @@ long hook_function(long a1, long a2, long a3,
   if (ret == ABT_SUCCESS && (abt_id >= 0)) {
 
     if (debug_print) {
-      debug_print(1, a1, abt_id);
+      if ((a1 != 17) && (a1 != 18))
+	debug_print(1, a1, abt_id);
     }
     if (a1 == 230) { // sleep
       if (a3 == 0) {
@@ -150,9 +166,9 @@ long hook_function(long a1, long a2, long a3,
 	ABT_thread_yield();
       }
     } else if (a1 == 257) { // openat
-#define MYFILE ("myfile")
-      if (strncmp(MYFILE, (char *)a3, strlen(MYFILE)) == 0) {
+      if (openat_file((char*)a3)) {
 	ret = next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+	printf("openat for mylib: fd=%d\n", ret);
 	if (ret < MAX_HOOKFD) {
 	  hookfds[ret] = 1;
 	}
@@ -162,8 +178,10 @@ long hook_function(long a1, long a2, long a3,
       }
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else if (a1 == 3) { // close
-      if (hookfds[a2] == 1)
+      if (hookfds[a2] == 1) {
+	printf("close for mylib: fd=%d\n", a2);
 	hookfds[a2] = 0;
+      }
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else if (a1 == 270) { //select
       //printf("%ld %lx %lx %lx %lx\n", a2, a3, a4, a5, a6);
@@ -216,20 +234,28 @@ long hook_function(long a1, long a2, long a3,
 	int rank;
 	ABT_xstream_self_rank(&rank);
 	int qid = rank + 1;
-	if (debug_print)
-	  debug_print(883, rank, 0);
 	size_t count = a4;
 	loff_t pos = a5;
-	int cid = nvme_read_req(pos / 512 + a2 * lba_file_offset, 1, qid, count, a3);
-	while (1) {
-	  if (nvme_read_check(qid, cid))
-	    break;
-	  ABT_thread_yield();
-	}
+	//printf("pread64 buf %lx\n", a3);
 	if (debug_print)
-	  debug_print(882, 0, 0);
+	  debug_print(883, a2, pos);
+	int j;
+	for (j=0; j<count/512; j++) {
+	  int cid = nvme_read_req(pos / 512 + j + a2 * lba_file_offset, 1, qid, 512, a3 + 512*j);
+	  while (1) {
+	    if (debug_print)
+	      debug_print(876, 0, 0);
+	    if (nvme_read_check(qid, cid))
+	      break;
+	    ABT_thread_yield();
+	  }
+	  if (debug_print)
+	    debug_print(882, 0, 0);
+	}
 	return count;
       } else {
+	if (debug_print)
+	  debug_print(874, a1, a2);
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
     } else if (a1 == 1) { // write
@@ -237,8 +263,6 @@ long hook_function(long a1, long a2, long a3,
 	int rank;
 	ABT_xstream_self_rank(&rank);
 	int qid = rank + 1;
-	if (debug_print)
-	  debug_print(883, rank, 0);
 	size_t count = a4;
 	int cid = nvme_write_req(cur_lba++ + a2 * lba_file_offset, 1, qid, count, a3);
 	while (1) {
@@ -257,15 +281,18 @@ long hook_function(long a1, long a2, long a3,
 	int rank;
 	ABT_xstream_self_rank(&rank);
 	int qid = rank + 1;
-	if (debug_print)
-	  debug_print(883, rank, 0);
 	size_t count = a4;
 	loff_t pos = a5;
-	int cid = nvme_write_req(pos / 512 + a2 * lba_file_offset, 1, qid, count, a3);
-	while (1) {
-	  if (nvme_write_check(qid, cid))
-	    break;
-	  ABT_thread_yield();
+	int j;
+	if (debug_print4)
+	  debug_print4(7, a2, a3, a4, a5);
+	for (j=0; j<count/512; j++) {
+	  int cid = nvme_write_req(pos / 512 + j + a2 * lba_file_offset, 1, qid, 512, a3 + 512*j);
+	  while (1) {
+	    if (nvme_write_check(qid, cid))
+	      break;
+	    ABT_thread_yield();
+	  }
 	}
 	return count;
       } else {
@@ -328,6 +355,14 @@ long hook_function(long a1, long a2, long a3,
 int __hook_init(long placeholder __attribute__((unused)),
 		void *sys_call_hook_ptr)
 {
+
+#ifdef MYFILE
+  printf("hooked file name : %s\n", MYFILE);
+#endif
+#ifdef MYDIR
+  printf("hooked rocksdb name : %s\n", MYDIR);
+#endif
+  
   load_debug();
   
   int i;

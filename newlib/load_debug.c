@@ -7,6 +7,7 @@
 
 
 void (*debug_print)(long, long, long) = NULL;
+void (*debug_print4)(long, long, long, long, long) = NULL;
 int (*debug_printf)(const char *format, ...) = NULL;
 
 void load_debug(void)
@@ -29,6 +30,7 @@ void load_debug(void)
   }
   {
     debug_print = dlsym(handle, "__debug_print");
+    debug_print4 = dlsym(handle, "__debug_print4");
     debug_printf = dlsym(handle, "__debug_printf");
   }
 }
