@@ -74,13 +74,14 @@ int openat_file(char *filename)
 #endif
 }
 
+#define MIN(x, y) ((x < y) ? x : y)
 
 #define MAX_HOOKFD (256)
 int hookfd = -1;
 int hookfds[MAX_HOOKFD];
 //const int lba_file_offset = 2ULL * 1024 * 1024 * 1024 / 512;
 const int lba_file_offset = 0;
-size_t cur_lba = 0;
+size_t cur_pos[MAX_HOOKFD];
 
 long hook_function(long a1, long a2, long a3,
 		   long a4, long a5, long a6,
@@ -221,12 +222,17 @@ long hook_function(long a1, long a2, long a3,
 	if (debug_print)
 	  debug_print(883, rank, 0);
 	size_t count = a4;
-	int cid = nvme_read_req(0, 1, qid, count, a3);
-	while (1) {
-	  if (nvme_read_check(qid, cid))
-	    break;
-	  ABT_thread_yield();
+	
+	int j;
+	for (j=0; j<count; j+=512) {
+	  int cid = nvme_read_req(myfs_get_lba(hookfds[a2], cur_pos[a2] + j, 0), 1, qid, MIN(512, count - j), a3 + 512);
+	  while (1) {
+	    if (nvme_read_check(qid, cid))
+	      break;
+	    ABT_thread_yield();
+	  }
 	}
+	cur_pos[a2] += count;
 	return count;
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -242,8 +248,8 @@ long hook_function(long a1, long a2, long a3,
 	if (debug_print)
 	  debug_print(883, a2, pos);
 	int j;
-	for (j=0; j<count/512; j++) {
-	  int cid = nvme_read_req(pos / 512 + j + a2 * lba_file_offset, 1, qid, 512, a3 + 512*j);
+	for (j=0; j<count; j+=512) {
+	  int cid = nvme_read_req(myfs_get_lba(hookfds[a2], pos + j, 0), 1, qid, MIN(512, count - 512), a3 + j);
 	  while (1) {
 	    if (debug_print)
 	      debug_print(876, 0, 0);
@@ -266,12 +272,16 @@ long hook_function(long a1, long a2, long a3,
 	ABT_xstream_self_rank(&rank);
 	int qid = rank + 1;
 	size_t count = a4;
-	int cid = nvme_write_req(cur_lba++ + a2 * lba_file_offset, 1, qid, count, a3);
-	while (1) {
-	  if (nvme_write_check(qid, cid))
-	    break;
-	  ABT_thread_yield();
+	int j;
+	for (j=0; j<count; j+=512) {
+	  int cid = nvme_write_req(myfs_get_lba(hookfds[a2], cur_pos[a2]+j, 1), 1, qid, MIN(512, count - j), a3 + j);
+	  while (1) {
+	    if (nvme_write_check(qid, cid))
+	      break;
+	    ABT_thread_yield();
+	  }
 	}
+	cur_pos[a2] += count;
 	return count;
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -288,8 +298,10 @@ long hook_function(long a1, long a2, long a3,
 	int j;
 	if (debug_print4)
 	  debug_print4(7, a2, a3, a4, a5);
-	for (j=0; j<count/512; j++) {
-	  int cid = nvme_write_req(pos / 512 + j + a2 * lba_file_offset, 1, qid, 512, a3 + 512*j);
+	for (j=0; j<count; j+=512) {
+	  
+	  //int cid = nvme_write_req(pos / 512 + j + a2 * lba_file_offset, 1, qid, 512, a3 + 512*j);
+	  int cid = nvme_write_req(myfs_get_lba(hookfds[a2], pos + j, 1), 1, qid, MIN(512, count - 512), a3 + j);
 	  while (1) {
 	    if (nvme_write_check(qid, cid))
 	      break;
@@ -369,6 +381,7 @@ int __hook_init(long placeholder __attribute__((unused)),
   int i;
   for (i=0; i<MAX_HOOKFD; i++) {
     hookfds[i] = -1;
+    cur_pos[i] = 0;
   }
   
   load_debug();
