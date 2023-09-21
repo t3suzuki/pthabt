@@ -33,7 +33,7 @@ static int superblock_fd = -1;
 
 #define MAGIC (0xdeadcafebabefaceULL)
 
-void
+static void
 myfs_init()
 {
   int i, j;
@@ -112,6 +112,7 @@ myfs_umount()
 }
 
 
+#if 0
 int main()
 {
   //myfs_init();
@@ -124,3 +125,4 @@ int main()
   myfs_umount();
   //myfs_deinit();
 }
+#endif

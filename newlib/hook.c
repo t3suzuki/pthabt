@@ -5,6 +5,7 @@
 #include <abt.h>
 #include "real_pthread.h"
 #include "nvme.h"
+#include "myfs.h"
 
 #define N_HELPER (32)
 
@@ -62,7 +63,7 @@ void do_helper(void *arg) {
 
 int openat_file(char *filename)
 {
-#if 0
+#if 1
 #define MYFILE ("myfile")
   return (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
 #else
@@ -170,7 +171,8 @@ long hook_function(long a1, long a2, long a3,
 	ret = next_sys_call(a1, a2, a3, a4, a5, a6, a7);
 	printf("openat for mylib: fd=%d\n", ret);
 	if (ret < MAX_HOOKFD) {
-	  hookfds[ret] = 1;
+	  hookfds[ret] = myfs_open((char *)a3);
+	  //hookfds[ret] = 1;
 	}
 	if (debug_print)
 	  debug_print(884, ret, 0);
@@ -178,9 +180,9 @@ long hook_function(long a1, long a2, long a3,
       }
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else if (a1 == 3) { // close
-      if (hookfds[a2] == 1) {
+      if (hookfds[a2] >= 0) {
 	printf("close for mylib: fd=%d\n", a2);
-	hookfds[a2] = 0;
+	hookfds[a2] = -1;
       }
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else if (a1 == 270) { //select
@@ -212,7 +214,7 @@ long hook_function(long a1, long a2, long a3,
 	ABT_thread_yield();
       }
     } else if (a1 == 0) { // read
-      if (hookfds[a2]) {
+      if (hookfds[a2] >= 0) {
 	int rank;
 	ABT_xstream_self_rank(&rank);
 	int qid = rank + 1;
@@ -230,7 +232,7 @@ long hook_function(long a1, long a2, long a3,
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
     } else if (a1 == 17) { // pread64
-      if (hookfds[a2]) {
+      if (hookfds[a2] >= 0) {
 	int rank;
 	ABT_xstream_self_rank(&rank);
 	int qid = rank + 1;
@@ -259,7 +261,7 @@ long hook_function(long a1, long a2, long a3,
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
     } else if (a1 == 1) { // write
-      if (hookfds[a2]) {
+      if (hookfds[a2] >= 0) {
 	int rank;
 	ABT_xstream_self_rank(&rank);
 	int qid = rank + 1;
@@ -277,7 +279,7 @@ long hook_function(long a1, long a2, long a3,
     } else if (a1 == 186) { // gettid
       return abt_id;
     } else if (a1 == 18) { // pwrite64
-      if (hookfds[a2]) {
+      if (hookfds[a2] >= 0) {
 	int rank;
 	ABT_xstream_self_rank(&rank);
 	int qid = rank + 1;
@@ -362,10 +364,16 @@ int __hook_init(long placeholder __attribute__((unused)),
 #ifdef MYDIR
   printf("hooked rocksdb name : %s\n", MYDIR);
 #endif
+  myfs_mount("myfs_superblock");
+
+  int i;
+  for (i=0; i<MAX_HOOKFD; i++) {
+    hookfds[i] = -1;
+  }
   
   load_debug();
+
   
-  int i;
   for (i=0; i<N_HELPER; i++) {
     helpers[i].id = i;
     real_pthread_mutex_init(&helpers[i].mutex, NULL);
@@ -381,3 +389,10 @@ int __hook_init(long placeholder __attribute__((unused)),
   return 0;
 
 }
+
+__attribute__((destructor(0xffff))) static void
+hook_deinit()
+{
+  myfs_umount();
+}
+
