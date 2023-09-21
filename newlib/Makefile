@@ -6,7 +6,7 @@ ABT_PATH=$(HOME)/argobots/install
 
 all:
 	g++ $(FLAGS) -c nvme.cc  -fno-exceptions
-	gcc $(FLAGS) -shared -o mylib.so mylib.c hook.c zpoline.c load_debug.c nvme.o -I $(ABT_PATH)/include -L $(ABT_PATH)/lib -labt -lopcodes -lstdc++
+	gcc $(FLAGS) -shared -o mylib.so mylib.c hook.c zpoline.c load_debug.c nvme.o myfs.c -I $(ABT_PATH)/include -L $(ABT_PATH)/lib -labt -lopcodes -lstdc++
 	gcc $(FLAGS) -shared -o debug.so debug.c
 
 patch:
@@ -33,3 +33,7 @@ build:
 
 set:
 	echo 0 | sudo tee -a /proc/sys/vm/mmap_min_addr
+
+tools:
+	gcc -O3 readperf.c -o readperf
+	gcc -O3 readetest.c -o readetest

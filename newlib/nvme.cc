@@ -201,7 +201,23 @@ public:
     if (cqe->SF.P == cq_phase) {
       do {
 	int cid = cqe->SF.CID;
-	//printf("cmd done cid = %d sct=%d sc=%x flag %d\n", cid, cqe->SF.SCT, cqe->SF.SC, cqe->SF.P);
+	if (0) {
+	  printf("cmd done cid = %d sct=%d sc=%x flag %d\n", cid, cqe->SF.SCT, cqe->SF.SC, cqe->SF.P);
+	  printf("buf4k=%p len=%d outbuf=%p\n", get_buf4k(cid), len[cid], rbuf[cid]);
+	  /*
+	  {
+	    unsigned char *buf = (unsigned char *)get_buf4k(cid);
+	    printf("buf = %p\n", buf);
+	    int i;
+	    for (i=0; i<512; i++) {
+	      printf("%02x ", buf[i]);
+	      if (i % 16 == 15)
+		printf("\n");
+	    }
+	    printf("\n");
+	  }
+	  */
+	}
 	/*
 	int tmp = cqe->SF.CID >> 8;
 	printf("cmd done sqhd=%d %d\n",  cqe->SQHD, cqe->SQID);
@@ -209,8 +225,20 @@ public:
 	printf("lba lower 8-bits %d\n", tmp);
 	*/
 	//sq_head = cqe->SQHD;
-	if (rbuf[cid])
+	if (rbuf[cid]) {
 	  memcpy(rbuf[cid], get_buf4k(cid), len[cid]);
+	  /* {
+	    unsigned char *buf = (unsigned char *)rbuf[cid];
+	    printf("buf = %p\n", buf);
+	    int i;
+	    for (i=0; i<512; i++) {
+	      printf("%02x ", buf[i]);
+	      if (i % 16 == 15)
+		printf("\n");
+	    }
+	    printf("\n");
+	    } */
+	}
 	done_flag[cid] = 1;
 	cq_head++;
 	if (cq_head == n_cqe) {
@@ -368,7 +396,20 @@ nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
   //if (debug_print)
   //debug_print(520, lba, cid);
   //printf("read_req qid = %d cid = %d lba = %d(%d)  %p %p\n", qid, cid, lba, lba & 0xff,sqe, qps[qid]->get_buf4k(cid));
-  //printf("read_req qid = %d cid = %d lba = %d\n", qid, cid, lba);
+  /*
+  bzero(qps[qid]->get_buf4k(cid), 512);
+  {
+    unsigned char *buf = (unsigned char *)qps[qid]->get_buf4k(cid);
+    int i;
+    for (i=0; i<512; i++) {
+      printf("%02x ", buf[i]);
+      if (i % 16 == 15)
+	printf("\n");
+    }
+  }
+  */
+  
+  //printf("read_req qid=%d cid=%d lba=%d buf4k=%p buf4k[0]=%02x\n", qid, cid, lba, qps[qid]->get_buf4k(cid), qps[qid]->get_buf4k(cid)[0]);
   qps[qid]->rbuf[cid] = buf;
   qps[qid]->len[cid] = len;
   qps[qid]->sq_doorbell();
@@ -423,7 +464,7 @@ nvme_write_check(int qid, int cid)
 }
 
   
-#if 1
+#if 0
 char wbuf[4096];
 char rbuf[4096];
 int
