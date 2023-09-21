@@ -63,7 +63,7 @@ void do_helper(void *arg) {
 
 int openat_file(char *filename)
 {
-#if 1
+#if 0
 #define MYFILE ("myfile")
   return (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
 #else
@@ -170,7 +170,7 @@ long hook_function(long a1, long a2, long a3,
     } else if (a1 == 257) { // openat
       if (openat_file((char*)a3)) {
 	ret = next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-	printf("openat for mylib: fd=%d\n", ret);
+	//printf("openat for mylib: fd=%d\n", ret);
 	if (ret < MAX_HOOKFD) {
 	  hookfds[ret] = myfs_open((char *)a3);
 	  //hookfds[ret] = 1;
@@ -182,7 +182,7 @@ long hook_function(long a1, long a2, long a3,
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else if (a1 == 3) { // close
       if (hookfds[a2] >= 0) {
-	printf("close for mylib: fd=%d\n", a2);
+	//printf("close for mylib: fd=%d\n", a2);
 	hookfds[a2] = -1;
       }
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -248,8 +248,9 @@ long hook_function(long a1, long a2, long a3,
 	if (debug_print)
 	  debug_print(883, a2, pos);
 	int j;
+	//printf("pread64 fd=%d, sz=%ld, pos=%ld\n", a2, count, pos);
 	for (j=0; j<count; j+=512) {
-	  int cid = nvme_read_req(myfs_get_lba(hookfds[a2], pos + j, 0), 1, qid, MIN(512, count - 512), a3 + j);
+	  int cid = nvme_read_req(myfs_get_lba(hookfds[a2], pos + j, 0), 1, qid, MIN(512, count - j), a3 + j);
 	  while (1) {
 	    if (debug_print)
 	      debug_print(876, 0, 0);
@@ -257,6 +258,18 @@ long hook_function(long a1, long a2, long a3,
 	      break;
 	    ABT_thread_yield();
 	  }
+	  //printf("pread64 fd=%d, sz=%ld, pos=%ld\n", a2, count, pos, myfs_get_lba(hookfds[a2], pos + j, 0));
+	  /*{
+	    unsigned char *buf = (char *)a3;
+	    printf("buf = %p\n", buf);
+	    int i;
+	    for (i=0; i<512; i++) {
+	      printf("%02x ", buf[i]);
+	      if (i % 16 == 15)
+		printf("\n");
+	    }
+	    printf("\n");
+	    }*/
 	  if (debug_print)
 	    debug_print(882, 0, 0);
 	}
@@ -296,12 +309,13 @@ long hook_function(long a1, long a2, long a3,
 	size_t count = a4;
 	loff_t pos = a5;
 	int j;
+	//printf("pwrite64 fd=%d, sz=%ld, pos=%ld\n", a2, count, pos);
 	if (debug_print4)
 	  debug_print4(7, a2, a3, a4, a5);
 	for (j=0; j<count; j+=512) {
 	  
 	  //int cid = nvme_write_req(pos / 512 + j + a2 * lba_file_offset, 1, qid, 512, a3 + 512*j);
-	  int cid = nvme_write_req(myfs_get_lba(hookfds[a2], pos + j, 1), 1, qid, MIN(512, count - 512), a3 + j);
+	  int cid = nvme_write_req(myfs_get_lba(hookfds[a2], pos + j, 1), 1, qid, MIN(512, count - j), a3 + j);
 	  while (1) {
 	    if (nvme_write_check(qid, cid))
 	      break;
