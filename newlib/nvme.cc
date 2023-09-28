@@ -10,14 +10,15 @@
 #include <unistd.h>
 #include <assert.h>
 #include <vector>
+#include "common.h"
 
 //extern void (*debug_print)(long, long, long);
 
 extern "C" {
 #include "nvme.h"
   
-#define NQ (8)
-#define QD (1024)
+#define NQ (N_TH)
+#define QD (N_ULT)
 #define AQD (8)
   
 static int enable_bus_master(int uio_index)
@@ -265,7 +266,7 @@ public:
 };
 
 
-QP *qps[NQ];
+QP *qps[NQ+1]; // +1 is for admin queue.
 
 
 void
@@ -369,7 +370,7 @@ nvme_init()
 
   {
     int iq;
-    for (iq=1; iq<NQ; iq++) {
+    for (iq=1; iq<=NQ; iq++) {
       qps[iq] = new QP(iq);
       create_qp(iq);
       //printf("%p %lx %p %lx\n", qps[iq]->get_cqe(0), qps[iq]->cq_pa(), qps[iq]->get_sqe(0), qps[iq]->sq_pa());

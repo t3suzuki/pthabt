@@ -273,7 +273,7 @@ int pthread_setspecific(pthread_key_t key, const void *value) {
 
 void * pthread_getspecific(pthread_key_t key) {
 #if __PTHREAD_VERBOSE__
-  printf("%s %d\n", __func__, __LINE__);
+  printf("%s %d key=%d\n", __func__, __LINE__, key);
 #endif
   void *ret;
   ABT_self_get_specific(*(abt_keys[key]), &ret);
@@ -349,7 +349,7 @@ pthread_t pthread_self(void)
 
 #if 1
 int sched_yield() {
-  {
+  if (0) {
     int pool_id;
     uint64_t abt_id;
     ABT_self_get_last_pool_id(&pool_id);
@@ -389,6 +389,5 @@ mylib_init()
   
   __zpoline_init();
 }
-
 
 
