@@ -225,9 +225,10 @@ long hook_function(long a1, long a2, long a3,
 	
 	int j;
 	for (j=0; j<count; j+=512) {
-	  int cid = nvme_read_req(myfs_get_lba(hookfds[a2], cur_pos[a2] + j, 0), 1, qid, MIN(512, count - j), a3 + 512);
+	  int lba = myfs_get_lba(hookfds[a2], cur_pos[a2] + j, 0);
+	  int cid = nvme_read_req(lba, 1, qid, MIN(512, count - j), a3 + 512);
 	  while (1) {
-	    if (nvme_read_check(qid, cid))
+	    if (nvme_read_check(lba, qid, cid))
 	      break;
 	    ABT_thread_yield();
 	  }
@@ -250,11 +251,12 @@ long hook_function(long a1, long a2, long a3,
 	int j;
 	//printf("pread64 fd=%d, sz=%ld, pos=%ld\n", a2, count, pos);
 	for (j=0; j<count; j+=512) {
-	  int cid = nvme_read_req(myfs_get_lba(hookfds[a2], pos + j, 0), 1, qid, MIN(512, count - j), a3 + j);
+	  uint32_t lba = myfs_get_lba(hookfds[a2], pos + j, 0);
+	  int cid = nvme_read_req(lba, 1, qid, MIN(512, count - j), a3 + j);
 	  while (1) {
 	    if (debug_print)
 	      debug_print(876, 0, 0);
-	    if (nvme_read_check(qid, cid))
+	    if (nvme_read_check(lba, qid, cid))
 	      break;
 	    ABT_thread_yield();
 	  }
@@ -287,9 +289,10 @@ long hook_function(long a1, long a2, long a3,
 	size_t count = a4;
 	int j;
 	for (j=0; j<count; j+=512) {
-	  int cid = nvme_write_req(myfs_get_lba(hookfds[a2], cur_pos[a2]+j, 1), 1, qid, MIN(512, count - j), a3 + j);
+	  uint32_t lba = myfs_get_lba(hookfds[a2], cur_pos[a2]+j, 1);
+	  int cid = nvme_write_req(lba, 1, qid, MIN(512, count - j), a3 + j);
 	  while (1) {
-	    if (nvme_write_check(qid, cid))
+	    if (nvme_write_check(lba, qid, cid))
 	      break;
 	    ABT_thread_yield();
 	  }
@@ -315,9 +318,10 @@ long hook_function(long a1, long a2, long a3,
 	for (j=0; j<count; j+=512) {
 	  
 	  //int cid = nvme_write_req(pos / 512 + j + a2 * lba_file_offset, 1, qid, 512, a3 + 512*j);
-	  int cid = nvme_write_req(myfs_get_lba(hookfds[a2], pos + j, 1), 1, qid, MIN(512, count - j), a3 + j);
+	  uint32_t lba = myfs_get_lba(hookfds[a2], pos + j, 1);
+	  int cid = nvme_write_req(lba, 1, qid, MIN(512, count - j), a3 + j);
 	  while (1) {
-	    if (nvme_write_check(qid, cid))
+	    if (nvme_write_check(lba, qid, cid))
 	      break;
 	    ABT_thread_yield();
 	  }
@@ -411,7 +415,8 @@ int __hook_init(long placeholder __attribute__((unused)),
   next_sys_call = *((syscall_fn_t *) sys_call_hook_ptr);
   *((syscall_fn_t *) sys_call_hook_ptr) = hook_function;
 
-  nvme_init();
+  nvme_init(0, 16);
+  nvme_init(1, 17);
   
   return 0;
 

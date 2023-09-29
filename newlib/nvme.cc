@@ -17,8 +17,9 @@
 extern "C" {
 #include "nvme.h"
   
+#define ND (2)
 #define NQ (N_TH)
-#define QD (N_ULT)
+#define QD (N_ULT*2)
 #define AQD (8)
   
 static int enable_bus_master(int uio_index)
@@ -93,9 +94,6 @@ typedef struct {
   } SF;
 } cqe_t;
 
-static volatile uint32_t *regs32;
-static volatile uint64_t *regs64;
-
 char *malloc_2MB()
 {
   const int sz = 2*1024*1024;
@@ -133,6 +131,8 @@ private:
   char *buf4k;
   uint64_t _buf4k_pa;
   int _qid;
+  volatile uint32_t *_regs32;
+  volatile uint64_t *_regs64;
 public:
   void *rbuf[QD];
   int len[QD];
@@ -142,7 +142,9 @@ public:
   inline sqe_t *get_sqe(int index) {
     return (sqe_t *)(sqcq + sq_offset) + index;
   }
-  QP(int qid) {
+  QP(int qid, volatile uint32_t *regs32) {
+    _regs32 = regs32;
+    _regs64 = (volatile uint64_t*)regs32;
     _qid = qid;
     sq_tail = 0;
     //sq_head = 0;
@@ -266,43 +268,44 @@ public:
 };
 
 
-QP *qps[NQ+1]; // +1 is for admin queue.
+QP *qps[ND][NQ+1]; // +1 is for admin queue.
 
 
 void
-create_qp(int new_qid)
+create_qp(int did, int new_qid)
 {
   // CQ create
   {
     int cid;
-    volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
+    volatile sqe_t *sqe = qps[did][0]->new_sqe(&cid);
     sqe->CDW0.OPC = 0x5; // create CQ
-    sqe->PRP1 = qps[new_qid]->cq_pa();
+    sqe->PRP1 = qps[did][new_qid]->cq_pa();
     sqe->NSID = 0;
-    sqe->CDW10 = ((qps[new_qid]->n_cqe - 1) << 16) | new_qid;
+    sqe->CDW10 = ((qps[did][new_qid]->n_cqe - 1) << 16) | new_qid;
     sqe->CDW11 = 1;
     //printf("%p %d %p %x\n", sqe, cid, sqe->PRP1, sqe->CDW10);
-    qps[0]->req_and_wait(cid);
+    qps[did][0]->req_and_wait(cid);
   }
   // SQ create
   {
     int cid;
-    volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
+    volatile sqe_t *sqe = qps[did][0]->new_sqe(&cid);
     sqe->CDW0.OPC = 0x1; // create SQ
-    sqe->PRP1 = qps[new_qid]->sq_pa();
+    sqe->PRP1 = qps[did][new_qid]->sq_pa();
     sqe->NSID = 0;
-    sqe->CDW10 = ((qps[new_qid]->n_sqe - 1) << 16) | new_qid;
+    sqe->CDW10 = ((qps[did][new_qid]->n_sqe - 1) << 16) | new_qid;
     sqe->CDW11 = (new_qid << 16) | 1; // physically contiguous
-    qps[0]->req_and_wait(cid);
+    qps[did][0]->req_and_wait(cid);
   }
   printf("CQ/SQ create done %d\n", new_qid);
 }
 
 int
-nvme_init()
+nvme_init(int did, int uio_index)
 {
-  int uio_index = 16;
-  
+  volatile uint32_t *regs32;
+  volatile uint64_t *regs64;
+
   enable_bus_master(uio_index);
   
   char path[256];
@@ -340,12 +343,12 @@ nvme_init()
   
   assert(csts == 0);
 
-  qps[0] = new QP(0);
-  
-  regs64[0x30 / sizeof(uint64_t)] = qps[0]->cq_pa(); // Admin CQ phyaddr
-  regs64[0x28 / sizeof(uint64_t)] = qps[0]->sq_pa(); // Admin SQ phyaddr
-  regs32[0x24 / sizeof(uint32_t)] = ((qps[0]->n_cqe - 1) << 16) | (qps[0]->n_sqe - 1); // Admin Queue Entry Num
-  //printf("%p %lx %p %lx\n", qps[0]->get_cqe(0), qps[0]->cq_pa(), qps[0]->get_sqe(0), qps[0]->sq_pa());
+  QP *adq = new QP(0, regs32);
+  qps[did][0] = adq;  
+  regs64[0x30 / sizeof(uint64_t)] = adq->cq_pa(); // Admin CQ phyaddr
+  regs64[0x28 / sizeof(uint64_t)] = adq->sq_pa(); // Admin SQ phyaddr
+  regs32[0x24 / sizeof(uint32_t)] = ((adq->n_cqe - 1) << 16) | (adq->n_sqe - 1); // Admin Queue Entry Num
+  //printf("%p %lx %p %lx\n", adq->get_cqe(0), adq->cq_pa(), adq->get_sqe(0), adq->sq_pa());
 
   // enable controller.
   cc = 0x460001;
@@ -360,19 +363,19 @@ nvme_init()
   {
     printf("identity cmd...\n");
     int cid;
-    volatile sqe_t *sqe = qps[0]->new_sqe(&cid);
+    volatile sqe_t *sqe = adq->new_sqe(&cid);
     sqe->CDW0.OPC = 0x6; // identity
     sqe->NSID = 0xffffffff;
     sqe->CDW10 = 0x1;
-    sqe->PRP1 = qps[0]->buf4k_pa(cid);
-    qps[0]->req_and_wait(cid);
+    sqe->PRP1 = adq->buf4k_pa(cid);
+    adq->req_and_wait(cid);
   }
 
   {
     int iq;
     for (iq=1; iq<=NQ; iq++) {
-      qps[iq] = new QP(iq);
-      create_qp(iq);
+      qps[did][iq] = new QP(iq, regs32);
+      create_qp(did, iq);
       //printf("%p %lx %p %lx\n", qps[iq]->get_cqe(0), qps[iq]->cq_pa(), qps[iq]->get_sqe(0), qps[iq]->sq_pa());
     }
   }
@@ -385,13 +388,16 @@ int
 nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
 {
   int cid;
-  sqe_t *sqe = qps[qid]->new_sqe(&cid);
+  int did = lba % ND;
+
+  QP *qp = qps[did][qid];  
+  sqe_t *sqe = qp->new_sqe(&cid);
   //qps[qid]->get_buf4k(cid)[0] = 0xff;
   //bzero(sqe, sizeof(sqe_t));
-  sqe->PRP1 = qps[qid]->buf4k_pa(cid);
+  sqe->PRP1 = qp->buf4k_pa(cid);
   sqe->CDW0.OPC = 0x2; // read
   //sqe->NSID = 1;
-  sqe->CDW10 = lba;
+  sqe->CDW10 = lba / ND;
   sqe->CDW12 = num_blk - 1;
   //sqe->CDW0.CID = ((lba & 0xff) << 8) | cid;
   //if (debug_print)
@@ -411,18 +417,20 @@ nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
   */
   
   //printf("read_req qid=%d cid=%d lba=%d buf4k=%p buf4k[0]=%02x\n", qid, cid, lba, qps[qid]->get_buf4k(cid), qps[qid]->get_buf4k(cid)[0]);
-  qps[qid]->rbuf[cid] = buf;
-  qps[qid]->len[cid] = len;
-  qps[qid]->sq_doorbell();
+  qp->rbuf[cid] = buf;
+  qp->len[cid] = len;
+  qp->sq_doorbell();
   return cid;
 }
 
 int
-nvme_read_check(int qid, int cid)
+nvme_read_check(int lba, int qid, int cid)
 {
-  unsigned char c = qps[qid]->get_buf4k(cid)[0];
-  qps[qid]->check_cq();
-  if (qps[qid]->done(cid)) {
+  int did = lba % ND;
+  QP *qp = qps[did][qid];
+  unsigned char c = qp->get_buf4k(cid)[0];
+  qp->check_cq();
+  if (qp->done(cid)) {
     //printf("read_cmp qid = %d cid = %d buf[0]=%d %d %p buf4k[0]=%d->%d\n", qid, cid, ((unsigned char*)buf)[0], len, qps[qid]->get_buf4k(cid), c, (unsigned char)(qps[qid]->get_buf4k(cid)[0]));
     //printf("read_cmp qid = %d cid = %d %d\n", qid, cid, len);    
     /*
@@ -440,24 +448,28 @@ int
 nvme_write_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
 {
   int cid;
-  sqe_t *sqe = qps[qid]->new_sqe(&cid);
-  memcpy(qps[qid]->get_buf4k(cid), buf, len);
-  sqe->PRP1 = qps[qid]->buf4k_pa(cid);
+  int did = lba % ND;
+  QP *qp = qps[did][qid];
+  sqe_t *sqe = qp->new_sqe(&cid);
+  memcpy(qp->get_buf4k(cid), buf, len);
+  sqe->PRP1 = qp->buf4k_pa(cid);
   sqe->CDW0.OPC = 0x1; // write
-  sqe->CDW10 = lba;
+  sqe->CDW10 = lba / ND;
   sqe->CDW12 = num_blk - 1;
   //printf("%s %d lba=%d num_blk=%d qid=%d len=%d cid=%d\n", __func__, __LINE__, lba, num_blk, qid, len, cid);
-  qps[qid]->rbuf[cid] = NULL;
-  qps[qid]->len[cid] = 0;
-  qps[qid]->sq_doorbell();
+  qp->rbuf[cid] = NULL;
+  qp->len[cid] = 0;
+  qp->sq_doorbell();
   return cid;
 }
 
 int
-nvme_write_check(int qid, int cid)
+nvme_write_check(int lba, int qid, int cid)
 {
-  qps[qid]->check_cq();
-  if (qps[qid]->done(cid)) {
+  int did = lba % ND;
+  QP *qp = qps[did][qid];
+  qp->check_cq();
+  if (qp->done(cid)) {
     //printf("write ok %d\n", cid);
     return 1;
   }
