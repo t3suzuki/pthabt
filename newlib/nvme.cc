@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <vector>
 #include "common.h"
+#include <time.h>
 
 //extern void (*debug_print)(long, long, long);
 
@@ -21,6 +22,22 @@ extern "C" {
 #define NQ (N_TH)
 #define QD (N_ULT*2)
 #define AQD (8)
+
+static uint64_t stat_read_count[NQ+1];
+static double stat_read_lasttime[NQ+1];
+
+void increment_read_count(int qid) {
+  stat_read_count[qid]++;
+  struct timespec tsc;
+  if (stat_read_count[qid] % (1024*1024) == 0) {
+    clock_gettime(CLOCK_MONOTONIC, &tsc);
+    double cur = tsc.tv_sec + tsc.tv_nsec * 1e-9;
+    double delta = cur - stat_read_lasttime[qid];
+    printf("th=%d, delta=%f, %f KIOPS\n", qid, delta, 1024*1024/delta/1000);
+    stat_read_lasttime[qid] = cur;
+  }
+}
+
   
 static int enable_bus_master(int uio_index)
 {
@@ -439,6 +456,7 @@ nvme_read_check(int lba, int qid, int cid)
       debug_print(522, ((unsigned int*)buf)[0], ((unsigned int*)(qps[qid]->get_buf4k(cid)))[0]);
     }
     */
+    increment_read_count(qid);
     return 1;
   }
   return 0;
