@@ -414,7 +414,7 @@ nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
   sqe->PRP1 = qp->buf4k_pa(cid);
   sqe->CDW0.OPC = 0x2; // read
   //sqe->NSID = 1;
-  sqe->CDW10 = (lba / 8) / ND + (lba % 8);
+  sqe->CDW10 = ((lba / 8) / ND * 8) + (lba % 8);
   sqe->CDW12 = num_blk - 1;
   //sqe->CDW0.CID = ((lba & 0xff) << 8) | cid;
   //if (debug_print)
@@ -466,13 +466,13 @@ int
 nvme_write_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
 {
   int cid;
-  int did = lba % ND;
+  int did = (lba / 8) % ND;
   QP *qp = qps[did][qid];
   sqe_t *sqe = qp->new_sqe(&cid);
   memcpy(qp->get_buf4k(cid), buf, len);
   sqe->PRP1 = qp->buf4k_pa(cid);
   sqe->CDW0.OPC = 0x1; // write
-  sqe->CDW10 = lba / ND;
+  sqe->CDW10 = ((lba / 8) / ND * 8) + (lba % 8);
   sqe->CDW12 = num_blk - 1;
   //printf("%s %d lba=%d num_blk=%d qid=%d len=%d cid=%d\n", __func__, __LINE__, lba, num_blk, qid, len, cid);
   qp->rbuf[cid] = NULL;
@@ -484,7 +484,7 @@ nvme_write_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
 int
 nvme_write_check(int lba, int qid, int cid)
 {
-  int did = lba % ND;
+  int did = (lba / 8) % ND;
   QP *qp = qps[did][qid];
   qp->check_cq();
   if (qp->done(cid)) {

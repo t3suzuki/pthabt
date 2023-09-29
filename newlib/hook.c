@@ -63,7 +63,7 @@ void do_helper(void *arg) {
 
 int openat_file(char *filename)
 {
-#if 1
+#if 0
 #define MYFILE ("myfile")
   return (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
 #else
@@ -251,32 +251,22 @@ long hook_function(long a1, long a2, long a3,
 	  debug_print(883, a2, pos);
 	int j;
 	//printf("pread64 fd=%d, sz=%ld, pos=%ld hookfsd[a2]=%d\n", a2, count, pos, hookfds[a2]);
-	const int blksz = BLKSZ;
+	int blksz = BLKSZ;
+	uint32_t lba = myfs_get_lba(hookfds[a2], pos + j, 0);
+	if ((lba % 8) * 512 + count > 4096) {
+	  blksz = 512;
+	}
 	for (j=0; j<count; j+=blksz) {
-	  uint32_t lba = myfs_get_lba(hookfds[a2], pos + j, 0);
+	  lba = myfs_get_lba(hookfds[a2], pos + j, 0);
 	  //printf("pread64 fd=%d, sz=%ld, pos=%ld lba=%lu\n", a2, count, pos, lba);
 	  int cid = nvme_read_req(lba, blksz/512, qid, MIN(blksz, count - j), a3 + j);
 	  while (1) {
 	    if (debug_print)
 	      debug_print(876, 0, 0);
 	    if (nvme_read_check(lba, qid, cid))
-	      break;
+		break;
 	    ABT_thread_yield();
 	  }
-	  //printf("pread64 fd=%d, sz=%ld, pos=%ld\n", a2, count, pos, myfs_get_lba(hookfds[a2], pos + j, 0));
-	  /*{
-	    unsigned char *buf = (char *)a3;
-	    printf("buf = %p\n", buf);
-	    int i;
-	    for (i=0; i<512; i++) {
-	      printf("%02x ", buf[i]);
-	      if (i % 16 == 15)
-		printf("\n");
-	    }
-	    printf("\n");
-	    }*/
-	  if (debug_print)
-	    debug_print(882, 0, 0);
 	}
 	return count;
       } else {
