@@ -6,13 +6,13 @@
 #include "real_pthread.h"
 #include "nvme.h"
 #include "myfs.h"
+#include "common.h"
 
 #define N_HELPER (32)
 
 typedef long (*syscall_fn_t)(long, long, long, long, long, long, long);
 static syscall_fn_t next_sys_call = NULL;
 
-extern void (*debug_print)(long, long, long);
 extern void (*debug_print4)(long, long, long, long, long);
 extern int (*debug_printf)(const char *format, ...);
 void load_debug(void);
@@ -63,7 +63,7 @@ void do_helper(void *arg) {
 
 int openat_file(char *filename)
 {
-#if 0
+#if 1
 #define MYFILE ("myfile")
   return (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
 #else
@@ -173,6 +173,7 @@ long hook_function(long a1, long a2, long a3,
 	//printf("openat for mylib: fd=%d\n", ret);
 	if (ret < MAX_HOOKFD) {
 	  hookfds[ret] = myfs_open((char *)a3);
+	  cur_pos[ret] = 0;
 	  //hookfds[ret] = 1;
 	}
 	if (debug_print)
@@ -249,10 +250,12 @@ long hook_function(long a1, long a2, long a3,
 	if (debug_print)
 	  debug_print(883, a2, pos);
 	int j;
-	//printf("pread64 fd=%d, sz=%ld, pos=%ld\n", a2, count, pos);
-	for (j=0; j<count; j+=512) {
+	//printf("pread64 fd=%d, sz=%ld, pos=%ld hookfsd[a2]=%d\n", a2, count, pos, hookfds[a2]);
+	const int blksz = BLKSZ;
+	for (j=0; j<count; j+=blksz) {
 	  uint32_t lba = myfs_get_lba(hookfds[a2], pos + j, 0);
-	  int cid = nvme_read_req(lba, 1, qid, MIN(512, count - j), a3 + j);
+	  //printf("pread64 fd=%d, sz=%ld, pos=%ld lba=%lu\n", a2, count, pos, lba);
+	  int cid = nvme_read_req(lba, blksz/512, qid, MIN(blksz, count - j), a3 + j);
 	  while (1) {
 	    if (debug_print)
 	      debug_print(876, 0, 0);
@@ -399,7 +402,7 @@ int __hook_init(long placeholder __attribute__((unused)),
   int i;
   for (i=0; i<MAX_HOOKFD; i++) {
     hookfds[i] = -1;
-    cur_pos[i] = 0;
+    //cur_pos[i] = 0;
   }
   
   load_debug();
