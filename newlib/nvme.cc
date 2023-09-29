@@ -136,7 +136,7 @@ public:
   int n_sqe;
   int n_cqe;
   const int sq_offset = 0x4000;
-  const int chunk_size = 512;
+  const int chunk_size = BLKSZ;
 private:
   int sq_tail;
   //int sq_head;
@@ -405,7 +405,7 @@ int
 nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
 {
   int cid;
-  int did = lba % ND;
+  int did = (lba / 8) % ND;
 
   QP *qp = qps[did][qid];  
   sqe_t *sqe = qp->new_sqe(&cid);
@@ -414,7 +414,7 @@ nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
   sqe->PRP1 = qp->buf4k_pa(cid);
   sqe->CDW0.OPC = 0x2; // read
   //sqe->NSID = 1;
-  sqe->CDW10 = lba / ND;
+  sqe->CDW10 = (lba / 8) / ND + (lba % 8);
   sqe->CDW12 = num_blk - 1;
   //sqe->CDW0.CID = ((lba & 0xff) << 8) | cid;
   //if (debug_print)
@@ -443,7 +443,7 @@ nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
 int
 nvme_read_check(int lba, int qid, int cid)
 {
-  int did = lba % ND;
+  int did = (lba / 8) % ND;
   QP *qp = qps[did][qid];
   unsigned char c = qp->get_buf4k(cid)[0];
   qp->check_cq();
