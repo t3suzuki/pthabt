@@ -1,6 +1,9 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <time.h>
 #include <abt.h>
 #include "real_pthread.h"
@@ -60,17 +63,25 @@ void do_helper(void *arg) {
   }
 }
 
+#define FOR_WT (1)
 
 int openat_file(char *filename)
 {
-#if 0
+#if FOR_FIO
 #define MYFILE ("myfile")
   return (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
-#else
+#endif
+
+#if FOR_ROCKSDB
 #define MYDIR ("/tmp/myfile4/")
 #define MYSUFFIX (".sst")  
   return ((strncmp(MYDIR, filename, strlen(MYDIR)) == 0) &&
 	  (strncmp(MYSUFFIX, filename + strlen(MYDIR) + 6, strlen(MYSUFFIX)) == 0));
+#endif
+
+#if FOR_WT
+#define MYFILE ("WT_TEST/test.wt")
+  return (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
 #endif
 }
 
@@ -101,6 +112,8 @@ long hook_function(long a1, long a2, long a3,
 	debug_print(1, a1, abt_id);
     }
     if (a1 == 230) { // sleep
+      if (debug_print)
+	debug_print(666, a2, a3);
       if (a3 == 0) {
 	struct timespec *ts = (struct timespec *) a4;
 	if (debug_print)
@@ -113,6 +126,7 @@ long hook_function(long a1, long a2, long a3,
 	  struct timespec ts2;
 	  clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
 	  double diff_nsec = (ts2.tv_sec - ts->tv_sec) * 1e9 + (ts2.tv_nsec - ts->tv_nsec);
+	  //printf("diff_nsec %f\n", diff_nsec);
 	  if (diff_nsec > 0)
 	    return 0;
 	  ABT_thread_yield();
@@ -168,9 +182,17 @@ long hook_function(long a1, long a2, long a3,
 	ABT_thread_yield();
       }
     } else if (a1 == 257) { // openat
+      /*
+      int i;
+      for (i=0; i<4; i++) {
+	char *filename = (char*)a3;
+	printf("%c", filename[i]);
+      }
+      printf("\n");
+      */
       if (openat_file((char*)a3)) {
 	ret = next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-	//printf("openat for mylib: fd=%d\n", ret);
+	printf("openat with mylib: fd=%d\n", ret);
 	if (ret < MAX_HOOKFD) {
 	  hookfds[ret] = myfs_open((char *)a3);
 	  cur_pos[ret] = 0;
@@ -183,7 +205,8 @@ long hook_function(long a1, long a2, long a3,
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else if (a1 == 3) { // close
       if (hookfds[a2] >= 0) {
-	//printf("close for mylib: fd=%d\n", a2);
+	printf("close for mylib: fd=%d\n", a2);
+	myfs_set_size(hookfds[a2], cur_pos[a2]);
 	hookfds[a2] = -1;
       }
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -250,9 +273,9 @@ long hook_function(long a1, long a2, long a3,
 	if (debug_print)
 	  debug_print(883, a2, pos);
 	int j;
-	//printf("pread64 fd=%d, sz=%ld, pos=%ld hookfsd[a2]=%d\n", a2, count, pos, hookfds[a2]);
 	int blksz = BLKSZ;
 	uint32_t lba = myfs_get_lba(hookfds[a2], pos + j, 0);
+	//printf("pread64 fd=%d, sz=%ld, pos=%ld hookfsd[a2]=%d lba=%d (%d)\n", a2, count, pos, hookfds[a2], lba, lba % 8);
 	if ((lba % 8) * 512 + count > 4096) {
 	  blksz = 512;
 	}
@@ -320,6 +343,15 @@ long hook_function(long a1, long a2, long a3,
 	  }
 	}
 	return count;
+      } else {
+	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+      }
+    } else if (a1 == 262) { // fstat
+      printf("fstat %d\n", a2);
+      if (((int32_t)a2 >= 0) && (hookfds[a2] >= 0)) {
+	int sz = myfs_get_size(a2);
+	printf("file size = %d fd=%d\n", sz, a2);
+	return 0;
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }

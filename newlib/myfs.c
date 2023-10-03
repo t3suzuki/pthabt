@@ -19,6 +19,7 @@
 typedef struct {
   char name[MYFS_MAX_NAMELEN];
   int32_t block[MYFS_MAX_BLOCKS_PER_FILE];
+  int32_t total_size;
 } file_t;
 
 typedef struct {
@@ -46,6 +47,27 @@ myfs_init()
   }
   superblock->magic = MAGIC;
   superblock->block_wp = 0;
+}
+
+void
+myfs_set_size(int i, int32_t sz) {
+  superblock->file[i].total_size = sz;
+}
+
+int
+myfs_get_size(int i) {
+  return superblock->file[i].total_size;
+}
+
+int
+myfs_get_size2(char *filename) {
+  int i;
+  for (i=0; i<MYFS_MAX_FILES; i++) {
+    if (strncmp(filename, superblock->file[i].name, strlen(filename)) == 0) {
+      return superblock->file[i].total_size;
+    }
+  }
+  return -1;
 }
 
 void
@@ -81,13 +103,14 @@ myfs_open(char *filename)
   for (i=0; i<MYFS_MAX_FILES; i++) {
     if (strncmp(filename, superblock->file[i].name, strlen(filename)) == 0) {
       //printf("%s found %s %s\n", __func__, filename, superblock->file[i].name);
+      //printf("%s found %s fileid=%d\n", __func__, filename, i);
       return i;
     }
     if ((empty_i == -1) && (superblock->file[i].name[0] == '\0')) {
       empty_i = i;
     }
   }
-  //printf("%s not found\n", __func__);
+  //printf("%s not found. fileid=%d\n", __func__, empty_i);
   strncpy(superblock->file[empty_i].name, filename, strlen(filename));
   return empty_i;
 }
@@ -101,7 +124,7 @@ myfs_get_lba(int i, uint64_t offset, int write) {
       superblock->file[i].block[i_block] = superblock->block_wp++;
     }
   }
-  //printf("%d %d %ld\n", i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
+  //printf("fileid=%d i_block %d block %d %ld\n", i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
   return ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (offset % MYFS_BLOCK_SIZE)) / 512;
 }
 
@@ -109,6 +132,7 @@ void
 myfs_umount()
 {
   fsync(superblock_fd);
+  printf("%s %d\n", __func__, __LINE__);
 }
 
 
