@@ -275,10 +275,16 @@ long hook_function(long a1, long a2, long a3,
 	int j;
 	int blksz = BLKSZ;
 	uint32_t lba = myfs_get_lba(hookfds[a2], pos + j, 0);
-	//printf("pread64 fd=%d, sz=%ld, pos=%ld hookfsd[a2]=%d lba=%d (%d)\n", a2, count, pos, hookfds[a2], lba, lba % 8);
-	if ((lba % 8) * 512 + count > 4096) {
-	  blksz = 512;
+	if (count < 4096) {
+	  if ((lba % 8) * 512 + count > 4096) {
+	    blksz = 512;
+	  }
+	} else {
+	  if ((count % blksz != 0) || (lba % (blksz / 512) != 0)) {
+	    blksz = 512;
+	  }
 	}
+	//printf("pread64 fd=%d, sz=%ld, pos=%ld hookfsd[a2]=%d lba=%d (%d) blksz=%d\n", a2, count, pos, hookfds[a2], lba, lba % 8, blksz);
 	for (j=0; j<count; j+=blksz) {
 	  lba = myfs_get_lba(hookfds[a2], pos + j, 0);
 	  //printf("pread64 fd=%d, sz=%ld, pos=%ld lba=%lu\n", a2, count, pos, lba);

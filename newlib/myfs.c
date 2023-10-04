@@ -12,7 +12,7 @@
 
 #define MYFS_BLOCK_SIZE (2*1024*1024)
 
-#define MYFS_MAX_BLOCKS_PER_FILE (1024)
+#define MYFS_MAX_BLOCKS_PER_FILE (1024*32)
 #define MYFS_MAX_NAMELEN (1024)
 #define MYFS_MAX_FILES   (1024)
 
@@ -120,11 +120,11 @@ myfs_get_lba(int i, uint64_t offset, int write) {
   int i_block = offset / MYFS_BLOCK_SIZE;
   if (write) {
     if (superblock->file[i].block[i_block] == -1) {
-      //printf("assign new block\n");
       superblock->file[i].block[i_block] = superblock->block_wp++;
+      //printf("assign new block %d\n", superblock->file[i].block[i_block]);
     }
   }
-  //printf("fileid=%d i_block %d block %d %ld\n", i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
+  //printf("fileid=%d i_block %d block %d offset %ld\n", i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
   return ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (offset % MYFS_BLOCK_SIZE)) / 512;
 }
 

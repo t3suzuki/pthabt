@@ -217,6 +217,12 @@ public:
     return buf4k + chunk_size * cid;
   }
   void check_cq() {
+    /*
+    if (cq_head < 0) {
+      printf("%d %d %d %p\n", cq_head, sq_tail, cq_phase, sqcq);
+      assert(0);
+    }
+    */
     volatile cqe_t *cqe = get_cqe(cq_head);
     if (cqe->SF.P == cq_phase) {
       do {
@@ -419,7 +425,7 @@ nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
   //sqe->CDW0.CID = ((lba & 0xff) << 8) | cid;
   //if (debug_print)
   //debug_print(520, lba, cid);
-  //printf("read_req qid = %d cid = %d lba = %d(%d)  %p %p\n", qid, cid, lba, lba & 0xff,sqe, qps[qid]->get_buf4k(cid));
+  //printf("read_req qid = %d cid = %d lba = %d\n", qid, cid, lba);
   /*
   bzero(qps[qid]->get_buf4k(cid), 512);
   {
