@@ -23,6 +23,9 @@ extern "C" {
 #define QD (N_ULT*2)
 #define AQD (8)
 
+#define RAID_FACTOR (8192 / 512)
+#define N_2MB_PAGE MAX(QD * BLKSZ / (2*1024*1024), 1)
+
 static uint64_t stat_read_count[NQ+1];
 static double stat_read_lasttime[NQ+1];
 
@@ -136,7 +139,6 @@ public:
   int n_sqe;
   int n_cqe;
   const int sq_offset = 0x4000;
-  const int chunk_size = BLKSZ;
 private:
   int sq_tail;
   //int sq_head;
@@ -145,8 +147,8 @@ private:
   char *sqcq;
   int done_flag[QD];
   volatile uint32_t *doorbell;
-  char *buf4k;
-  uint64_t _buf4k_pa;
+  char *buf4k[N_2MB_PAGE];
+  uint64_t _buf4k_pa[N_2MB_PAGE];
   int _qid;
   volatile uint32_t *_regs32;
   volatile uint64_t *_regs64;
@@ -170,8 +172,11 @@ public:
     n_sqe = (qid == 0) ? AQD : QD;
     n_cqe = (qid == 0) ? AQD : QD;
     sqcq = malloc_2MB();
-    buf4k = malloc_2MB();
-    _buf4k_pa = v2p((size_t)buf4k);
+    printf("N_2MB_PAGE %d %d\n", N_2MB_PAGE, QD*BLKSZ, QD*BLKSZ/2);
+    for (int i=0; i<N_2MB_PAGE; i++) {
+      buf4k[i] = malloc_2MB();
+      _buf4k_pa[i] = v2p((size_t)buf4k[i]);
+    }
     for (int i=0; i<QD; i++) {
       done_flag[i] = 2;
     }
@@ -190,7 +195,9 @@ public:
     return v2p((size_t)sqcq) + sq_offset;
   }
   uint64_t buf4k_pa(int cid) {
-    return _buf4k_pa + chunk_size * cid;
+    int cid_upper = cid % N_2MB_PAGE;
+    int cid_lower = cid / N_2MB_PAGE;
+    return _buf4k_pa[cid_upper] + BLKSZ * cid_lower;
   }
   sqe_t *new_sqe(int *ret_cid = nullptr) {
     sqe_t *sqe = get_sqe(sq_tail);
@@ -214,7 +221,9 @@ public:
     *(doorbell) = sq_tail;
   }
   char *get_buf4k(int cid) {
-    return buf4k + chunk_size * cid;
+    int cid_upper = cid % N_2MB_PAGE;
+    int cid_lower = cid / N_2MB_PAGE;
+    return buf4k[cid_upper] + BLKSZ * cid_lower;
   }
   void check_cq() {
     /*
@@ -411,7 +420,7 @@ int
 nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
 {
   int cid;
-  int did = (lba / 8) % ND;
+  int did = (lba / RAID_FACTOR) % ND;
 
   QP *qp = qps[did][qid];  
   sqe_t *sqe = qp->new_sqe(&cid);
@@ -420,7 +429,7 @@ nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
   sqe->PRP1 = qp->buf4k_pa(cid);
   sqe->CDW0.OPC = 0x2; // read
   //sqe->NSID = 1;
-  sqe->CDW10 = ((lba / 8) / ND * 8) + (lba % 8);
+  sqe->CDW10 = ((lba / RAID_FACTOR) / ND * RAID_FACTOR) + (lba % RAID_FACTOR);
   sqe->CDW12 = num_blk - 1;
   //sqe->CDW0.CID = ((lba & 0xff) << 8) | cid;
   //if (debug_print)
@@ -449,7 +458,7 @@ nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
 int
 nvme_read_check(int lba, int qid, int cid)
 {
-  int did = (lba / 8) % ND;
+  int did = (lba / RAID_FACTOR) % ND;
   QP *qp = qps[did][qid];
   unsigned char c = qp->get_buf4k(cid)[0];
   qp->check_cq();
@@ -472,13 +481,13 @@ int
 nvme_write_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
 {
   int cid;
-  int did = (lba / 8) % ND;
+  int did = (lba / RAID_FACTOR) % ND;
   QP *qp = qps[did][qid];
   sqe_t *sqe = qp->new_sqe(&cid);
   memcpy(qp->get_buf4k(cid), buf, len);
   sqe->PRP1 = qp->buf4k_pa(cid);
   sqe->CDW0.OPC = 0x1; // write
-  sqe->CDW10 = ((lba / 8) / ND * 8) + (lba % 8);
+  sqe->CDW10 = ((lba / RAID_FACTOR) / ND * RAID_FACTOR) + (lba % RAID_FACTOR);
   sqe->CDW12 = num_blk - 1;
   //printf("%s %d lba=%d num_blk=%d qid=%d len=%d cid=%d\n", __func__, __LINE__, lba, num_blk, qid, len, cid);
   qp->rbuf[cid] = NULL;
@@ -490,7 +499,7 @@ nvme_write_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
 int
 nvme_write_check(int lba, int qid, int cid)
 {
-  int did = (lba / 8) % ND;
+  int did = (lba / RAID_FACTOR) % ND;
   QP *qp = qps[did][qid];
   qp->check_cq();
   if (qp->done(cid)) {
