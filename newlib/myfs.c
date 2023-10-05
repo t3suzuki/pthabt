@@ -9,6 +9,8 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <errno.h>
+#include "nvme.h"
+#include "common.h"
 
 #define MYFS_BLOCK_SIZE (2*1024*1024)
 
@@ -42,7 +44,7 @@ myfs_init()
   for (i=0; i<MYFS_MAX_FILES; i++) {
     superblock->file[i].name[0] = '\0';
     for (j=0; j<MYFS_MAX_BLOCKS_PER_FILE; j++) {
-      superblock->file[i].block[j] = -1;
+      superblock->file[i].block[j] = INACTIVE_BLOCK;
     }
   }
   superblock->magic = MAGIC;
@@ -95,6 +97,21 @@ myfs_mount(char *myfs_superblock)
   }
 }
 
+void
+myfs_allocate(int i, long offset)
+{
+  int i_block = 0;
+  while (1) {
+    if (i_block * MYFS_BLOCK_SIZE > offset) {
+      break;
+    }
+    if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
+      superblock->file[i].block[i_block] = JUST_ALLOCATED;
+    }
+    i_block++;
+  }
+}
+
 int
 myfs_open(char *filename)
 {
@@ -112,20 +129,60 @@ myfs_open(char *filename)
   }
   //printf("%s not found. fileid=%d\n", __func__, empty_i);
   strncpy(superblock->file[empty_i].name, filename, strlen(filename));
+  superblock->file[empty_i].total_size = 0;
   return empty_i;
 }
 
 int
-myfs_get_lba(int i, uint64_t offset, int write) {
+myfs_get_lba_old(int i, uint64_t offset, int write) {
   int i_block = offset / MYFS_BLOCK_SIZE;
-  if (write) {
-    if (superblock->file[i].block[i_block] == -1) {
+  if (superblock->file[i].block[i_block] == JUST_ALLOCATED) {
+    return JUST_ALLOCATED;
+  }
+  if (write > 0) {
+    if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
       superblock->file[i].block[i_block] = superblock->block_wp++;
-      //printf("assign new block %d\n", superblock->file[i].block[i_block]);
+      printf("assign new block %d\n", superblock->file[i].block[i_block]);
     }
   }
-  //printf("fileid=%d i_block %d block %d offset %ld\n", i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
-  return ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (offset % MYFS_BLOCK_SIZE)) / 512;
+  printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
+  int lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (offset % MYFS_BLOCK_SIZE)) / 512;
+  return lba;
+}
+
+char zbuf[BLKSZ];
+
+int
+myfs_get_lba(int i, uint64_t offset, int write) {
+  int i_block = offset / MYFS_BLOCK_SIZE;
+  if (write > 0) {
+    if (superblock->file[i].block[i_block] == JUST_ALLOCATED) {
+      if (write) {
+	superblock->file[i].block[i_block] = superblock->block_wp++;
+	int qid = get_qid();
+	for (int j=0; j<MYFS_BLOCK_SIZE; j+=BLKSZ) {
+	  int lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (j % MYFS_BLOCK_SIZE)) / 512;
+	  int cid = nvme_write_req(lba, BLKSZ/512, qid, BLKSZ, zbuf);
+	  while (1) {
+	    if (nvme_write_check(lba, qid, cid))
+	    break;
+	    ABT_thread_yield();
+	  }
+	}
+      }
+    }
+    if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
+      superblock->file[i].block[i_block] = superblock->block_wp++;
+      printf("assign new block %d\n", superblock->file[i].block[i_block]);
+    }
+  } else {
+    if (superblock->file[i].block[i_block] == JUST_ALLOCATED) {
+      return JUST_ALLOCATED;
+    }
+  }
+  printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
+  int lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (offset % MYFS_BLOCK_SIZE)) / 512;
+  return lba;
 }
 
 void

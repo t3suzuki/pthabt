@@ -5,7 +5,7 @@ FLAGS += -fpic
 ABT_PATH=$(HOME)/argobots/install
 
 all:
-	g++ $(FLAGS) -c nvme.cc  -fno-exceptions
+	g++ $(FLAGS) -c nvme.cc  -fno-exceptions -I $(ABT_PATH)/include
 	gcc $(FLAGS) -shared -o mylib.so mylib.c hook.c zpoline.c load_debug.c nvme.o myfs.c -I $(ABT_PATH)/include -L $(ABT_PATH)/lib -labt -lopcodes -lstdc++
 	gcc $(FLAGS) -shared -o debug.so debug.c
 

@@ -23,7 +23,7 @@ extern "C" {
 #define QD (N_ULT*2)
 #define AQD (8)
 
-#define RAID_FACTOR (8192 / 512)
+#define RAID_FACTOR (4096 / 512)
 #define N_2MB_PAGE MAX(QD * BLKSZ / (2*1024*1024), 1)
 
 static uint64_t stat_read_count[NQ+1];
@@ -48,9 +48,9 @@ static int enable_bus_master(int uio_index)
   sprintf(path, "/sys/class/uio/uio%d/device/config", uio_index);
   int fd = open(path, O_RDWR);
   uint32_t val;
-  pread(fd, &val, 4, 0x4);
+  int ret = pread(fd, &val, 4, 0x4);
   val = 0x06;
-  pwrite(fd, &val, 4, 0x4);
+  ret = pwrite(fd, &val, 4, 0x4);
   close(fd);
   return 0;
 }
@@ -172,7 +172,7 @@ public:
     n_sqe = (qid == 0) ? AQD : QD;
     n_cqe = (qid == 0) ? AQD : QD;
     sqcq = malloc_2MB();
-    printf("N_2MB_PAGE %d %d\n", N_2MB_PAGE, QD*BLKSZ, QD*BLKSZ/2);
+    //printf("N_2MB_PAGE %d %d\n", N_2MB_PAGE, QD*BLKSZ, QD*BLKSZ/2);
     for (int i=0; i<N_2MB_PAGE; i++) {
       buf4k[i] = malloc_2MB();
       _buf4k_pa[i] = v2p((size_t)buf4k[i]);

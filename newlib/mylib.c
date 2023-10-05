@@ -168,7 +168,7 @@ inline static ABT_cond *get_abt_cond(pthread_cond_t *cond)
     uint64_t abt_id;
     ABT_self_get_last_pool_id(&pool_id);
     ABT_self_get_thread_id(&abt_id);
-    printf("%d pool_id %d\n", abt_id, pool_id);
+    printf("%lu pool_id %d\n", abt_id, pool_id);
   }
   if (*(my_magic_t *)cond == 0) {
     pthread_cond_init(cond, NULL);
@@ -354,7 +354,7 @@ int sched_yield() {
     uint64_t abt_id;
     ABT_self_get_last_pool_id(&pool_id);
     ABT_self_get_thread_id(&abt_id);
-    printf("%d pool_id %d\n", abt_id, pool_id);
+    printf("%lu pool_id %d\n", abt_id, pool_id);
   }
   return ABT_thread_yield();
 }

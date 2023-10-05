@@ -1,11 +1,14 @@
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include <stdbool.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <assert.h>
 #include <time.h>
-#include <abt.h>
+#include <linux/aio_abi.h>
+
 #include "real_pthread.h"
 #include "nvme.h"
 #include "myfs.h"
@@ -63,7 +66,7 @@ void do_helper(void *arg) {
   }
 }
 
-#define FOR_WT (1)
+#define FOR_KVELL (1)
 
 int openat_file(char *filename)
 {
@@ -79,13 +82,24 @@ int openat_file(char *filename)
 	  (strncmp(MYSUFFIX, filename + strlen(MYDIR) + 6, strlen(MYSUFFIX)) == 0));
 #endif
 
+#if FOR_KVELL
+#define MYDIR ("/home/tomoya-s/mountpoint/tomoya-s/KVell/db/")
+#define MYPREFIX ("slab")  
+  return ((strncmp(MYDIR, filename, strlen(MYDIR)) == 0) &&
+	  (strncmp(MYPREFIX, filename + strlen(MYDIR), strlen(MYPREFIX)) == 0));
+#endif
+  
 #if FOR_WT
 #define MYFILE ("WT_TEST/test.wt")
   return (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
 #endif
 }
 
-#define MIN(x, y) ((x < y) ? x : y)
+
+static struct iocb *cur_aios[1024];
+static int cur_aio_wp;
+static int cur_aio_rp;
+static int cur_aio_max;
 
 #define MAX_HOOKFD (256)
 int hookfd = -1;
@@ -94,22 +108,69 @@ int hookfds[MAX_HOOKFD];
 const int lba_file_offset = 0;
 size_t cur_pos[MAX_HOOKFD];
 
+void
+read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
+{
+  int qid = get_qid();
+  assert(pos % 512 == 0);
+  int blksz = ((len % BLKSZ != 0) || (pos % BLKSZ != 0)) ? 512 : BLKSZ;
+  
+  int j;
+  for (j=0; j<len; j+=blksz) {
+    int lba = myfs_get_lba(hookfd, pos + j, 0);
+    if (lba == JUST_ALLOCATED) {
+      memset(buf + j, 0, MIN(blksz, len - j));
+    } else {
+      int cid = nvme_read_req(lba, blksz/512, qid, MIN(blksz, len - j), buf + j);
+      while (1) {
+	if (nvme_read_check(lba, qid, cid))
+	  break;
+	ABT_thread_yield();
+      }
+    }
+  }
+}
+
+void
+write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
+{
+  int qid = get_qid();
+  assert(pos % 512 == 0);
+  int blksz = ((len % BLKSZ != 0) || (pos % BLKSZ != 0)) ? 512 : BLKSZ;
+  
+  int j;
+  for (j=0; j<len; j+=blksz) {
+    int lba = myfs_get_lba(hookfd, pos + j, 0);
+    int cid = nvme_read_req(lba, blksz/512, qid, MIN(blksz, len - j), buf + j);
+    while (1) {
+      if (nvme_read_check(lba, qid, cid))
+	break;
+      ABT_thread_yield();
+    }
+  }
+}
+
+
+
 long hook_function(long a1, long a2, long a3,
 		   long a4, long a5, long a6,
 		   long a7)
 {
+
   /*
   if (debug_print) {
     debug_print(1, a1, 9999);
   }
   */
+
   uint64_t abt_id;
   int ret = ABT_self_get_thread_id(&abt_id);
   if (ret == ABT_SUCCESS && (abt_id >= 0)) {
-
+    if (a1 != 1) {
+      printf("call %ld %ld\n", a1, abt_id);
+    }
     if (debug_print) {
-      if ((a1 != 17) && (a1 != 18))
-	debug_print(1, a1, abt_id);
+      debug_print(1, a1, abt_id);
     }
     if (a1 == 230) { // sleep
       if (debug_print)
@@ -193,6 +254,13 @@ long hook_function(long a1, long a2, long a3,
       if (openat_file((char*)a3)) {
 	ret = next_sys_call(a1, a2, a3, a4, a5, a6, a7);
 	printf("openat with mylib: fd=%d\n", ret);
+	
+	int i;
+	char *filename = (char*)a3;
+	for (i=0; i<16; i++) {
+	  printf("%c", filename[i]);
+	}
+	printf("%s \n", filename);
 	if (ret < MAX_HOOKFD) {
 	  hookfds[ret] = myfs_open((char *)a3);
 	  cur_pos[ret] = 0;
@@ -205,7 +273,7 @@ long hook_function(long a1, long a2, long a3,
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else if (a1 == 3) { // close
       if (hookfds[a2] >= 0) {
-	printf("close for mylib: fd=%d\n", a2);
+	printf("close for mylib: fd=%ld\n", a2);
 	myfs_set_size(hookfds[a2], cur_pos[a2]);
 	hookfds[a2] = -1;
       }
@@ -239,6 +307,7 @@ long hook_function(long a1, long a2, long a3,
 	ABT_thread_yield();
       }
     } else if (a1 == 0) { // read
+#if 0
       if (hookfds[a2] >= 0) {
 	int rank;
 	ABT_xstream_self_rank(&rank);
@@ -262,7 +331,20 @@ long hook_function(long a1, long a2, long a3,
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
+#else
+      int hookfd = hookfds[a2];
+      char *buf = (char *)a3;
+      loff_t len = a4;
+      if (hookfd >= 0) {
+	read_impl(hookfd, len, cur_pos[a2], buf);
+	cur_pos[a2] += len;
+	return len;
+      } else {
+	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+      }
+#endif
     } else if (a1 == 17) { // pread64
+#if 0
       if (hookfds[a2] >= 0) {
 	int rank;
 	ABT_xstream_self_rank(&rank);
@@ -274,7 +356,7 @@ long hook_function(long a1, long a2, long a3,
 	  debug_print(883, a2, pos);
 	int j;
 	int blksz = BLKSZ;
-	uint32_t lba = myfs_get_lba(hookfds[a2], pos + j, 0);
+	int lba = myfs_get_lba(hookfds[a2], pos, 0);
 	if (count < 4096) {
 	  if ((lba % 8) * 512 + count > 4096) {
 	    blksz = 512;
@@ -284,7 +366,7 @@ long hook_function(long a1, long a2, long a3,
 	    blksz = 512;
 	  }
 	}
-	//printf("pread64 fd=%d, sz=%ld, pos=%ld hookfsd[a2]=%d lba=%d (%d) blksz=%d\n", a2, count, pos, hookfds[a2], lba, lba % 8, blksz);
+	//printf("pread64 fd=%d, sz=%ld, pos=%ld hookfsd[a2]=%d lba=%d (%d) blksz=%d\n", a2, count, pos, hookfds[a2], lba, lba % (blksz / 512), blksz);
 	for (j=0; j<count; j+=blksz) {
 	  lba = myfs_get_lba(hookfds[a2], pos + j, 0);
 	  //printf("pread64 fd=%d, sz=%ld, pos=%ld lba=%lu\n", a2, count, pos, lba);
@@ -303,11 +385,22 @@ long hook_function(long a1, long a2, long a3,
 	  debug_print(874, a1, a2);
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
+#else
+      int hookfd = hookfds[a2];
+      char *buf = (char *)a3;
+      loff_t len = a4;
+      loff_t pos = a5;
+      if (hookfd >= 0) {
+	read_impl(hookfd, len, pos, buf);
+	return len;
+      } else {
+	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+      }
+#endif
     } else if (a1 == 1) { // write
+#if 0
       if (hookfds[a2] >= 0) {
-	int rank;
-	ABT_xstream_self_rank(&rank);
-	int qid = rank + 1;
+	int qid = get_qid();
 	size_t count = a4;
 	int j;
 	for (j=0; j<count; j+=512) {
@@ -324,23 +417,34 @@ long hook_function(long a1, long a2, long a3,
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
+#else
+      int hookfd = hookfds[a2];
+      char *buf = (char *)a3;
+      loff_t len = a4;
+      if (hookfd >= 0) {
+	write_impl(hookfd, len, cur_pos[a2], buf);
+	cur_pos[a2] += len;
+	return len;
+      } else {
+	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+      }
+#endif
     } else if (a1 == 186) { // gettid
       return abt_id;
     } else if (a1 == 18) { // pwrite64
+#if 0
       if (hookfds[a2] >= 0) {
-	int rank;
-	ABT_xstream_self_rank(&rank);
-	int qid = rank + 1;
+	int qid = get_qid();
 	size_t count = a4;
 	loff_t pos = a5;
+	int fd = a2;
 	int j;
 	//printf("pwrite64 fd=%d, sz=%ld, pos=%ld\n", a2, count, pos);
 	if (debug_print4)
 	  debug_print4(7, a2, a3, a4, a5);
 	for (j=0; j<count; j+=512) {
-	  
 	  //int cid = nvme_write_req(pos / 512 + j + a2 * lba_file_offset, 1, qid, 512, a3 + 512*j);
-	  uint32_t lba = myfs_get_lba(hookfds[a2], pos + j, 1);
+	  int lba = myfs_get_lba(hookfds[fd], pos + j, 1);
 	  int cid = nvme_write_req(lba, 1, qid, MIN(512, count - j), a3 + j);
 	  while (1) {
 	    if (nvme_write_check(lba, qid, cid))
@@ -352,15 +456,125 @@ long hook_function(long a1, long a2, long a3,
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
+#else
+      int hookfd = hookfds[a2];
+      char *buf = (char *)a3;
+      loff_t len = a4;
+      loff_t pos = a5;
+      if (hookfd >= 0) {
+	write_impl(hookfd, len, pos, buf);
+	return len;
+      } else {
+	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+      }
+#endif
     } else if (a1 == 262) { // fstat
-      printf("fstat %d\n", a2);
+      printf("fstat %ld\n", a2);
       if (((int32_t)a2 >= 0) && (hookfds[a2] >= 0)) {
 	int sz = myfs_get_size(a2);
-	printf("file size = %d fd=%d\n", sz, a2);
+	struct stat *statbuf = (struct stat*)a4;
+	statbuf->st_size = sz;
+	printf("file size = %d fd=%ld\n", sz, a2);
 	return 0;
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
+    } else if (a1 == 208) { // io_getevents
+      int min_nr = a3;
+      int nr = a4;
+      int completed = 0;
+      struct io_event *events = (struct io_event *)a5;
+      while (completed < nr) {
+	if (cur_aio_wp == cur_aio_rp) {
+	  break;
+	}
+	printf("cur_aio_wp = %d, cur_aio_rp = %d\n", cur_aio_wp, cur_aio_rp);
+	int qid = cur_aios[cur_aio_rp]->aio_key;
+	int cid = cur_aios[cur_aio_rp]->aio_reserved2;
+	if (cid != JUST_ALLOCATED) {
+	  int fd = cur_aios[cur_aio_rp]->aio_fildes;
+	  uint64_t pos = cur_aios[cur_aio_rp]->aio_offset;
+	  int lba = myfs_get_lba(hookfds[fd], pos, 0);
+	  printf("io_getevents fd=%d cid=%d pos=%lu lba=%u qid=%d\n", fd, cid, pos, lba, qid);
+	  if (nvme_read_check(lba, qid, cid) == 0)
+	    ABT_thread_yield();
+	}
+	printf("%s %d completed%d\n", __func__, __LINE__, completed);
+	events[completed].data = cur_aios[cur_aio_rp]->aio_buf;
+	events[completed].obj = (uint64_t)cur_aios[cur_aio_rp];
+	events[completed].res = cur_aios[cur_aio_rp]->aio_nbytes;
+	events[completed].res2 = 0;
+	completed++;
+	cur_aio_rp = (cur_aio_rp + 1) % cur_aio_max;
+	if (completed == nr)
+	  break;
+      }
+      printf("%d\n", completed);
+      return completed;
+    } else if (a1 == 209) { // io_submit
+      int qid = get_qid();
+      struct iocb **ios = (struct iocb **)a4;
+      int n_io = a3;
+      int i;
+      for (i=0; i<n_io; i++) {
+	if ((cur_aio_wp + 1) % cur_aio_max == cur_aio_rp) {
+	  break;
+	}
+	printf("cur_aio_wp = %d\n", cur_aio_wp);
+	cur_aios[cur_aio_wp] = ios[i];
+	cur_aio_wp = (cur_aio_wp + 1) % cur_aio_max;
+	int fd = ios[i]->aio_fildes;
+	int op = ios[i]->aio_lio_opcode;
+	char *buf = (char *)ios[i]->aio_buf;
+	uint64_t len = ios[i]->aio_nbytes;
+	uint64_t pos = ios[i]->aio_offset;
+	int blksz = BLKSZ;
+	assert(hookfds[fd] >= 0);
+	
+	if (op == IOCB_CMD_PREAD) {
+	  int32_t lba = myfs_get_lba(hookfds[fd], pos, 0);
+	  if (lba == JUST_ALLOCATED) {
+	    memset(buf, 0, len);
+	    ios[i]->aio_key = qid;
+	    ios[i]->aio_reserved2 = JUST_ALLOCATED;
+	    printf("io_submit read op=%d fd=%d, sz=%ld, pos=%ld lba=%d JUST_ALLOCATED\n", op, fd, len, pos, lba);
+	  } else {
+	    int cid = nvme_read_req(lba, blksz/512, qid, MIN(blksz, len), buf);
+	    printf("io_submit read op=%d fd=%d, sz=%ld, pos=%ld lba=%d cid=%d qid=%d\n", op, fd, len, pos, lba, cid, qid);
+	    ios[i]->aio_key = qid;
+	    ios[i]->aio_reserved2 = cid;
+	  }
+	}
+	if (op == IOCB_CMD_PWRITE) {
+	  int32_t lba = myfs_get_lba(hookfds[fd], pos, 1);
+	  int cid = nvme_write_req(lba, blksz/512, qid, MIN(blksz, len), buf);
+	  printf("io_submit write op=%d fd=%d, sz=%ld, pos=%ld lba=%d cid=%d qid=%d\n", op, fd, len, pos, lba, cid, qid);
+	  ios[i]->aio_key = cid;
+	}
+      }
+      return i;//return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+    } else if (a1 == 206) { // io_setup
+      cur_aio_max = a2;
+      cur_aio_wp = 0;
+      cur_aio_rp = 0;
+      cur_aio_max = a2;
+      printf("io_setup %d %p %p\n", cur_aio_max, (void *)a3, cur_aios);
+      return 0;
+    } else if (a1 == 207) { // io_destroy
+      printf("io_destroy %ld %p\n", a2, (void *)a3);
+      return 0;
+    } else if (a1 == 285) { // fallocate
+      int rank;
+      ABT_xstream_self_rank(&rank);
+      int qid = rank + 1;
+      int fd = a2;
+      loff_t pos = a4;
+      loff_t len = a5;
+      printf("fd=%ld mode=%ld offset=%ld len=%ld\n", a2, a3, a4, a5);
+      if (hookfds[fd] >= 0) {
+	myfs_allocate(hookfds[fd], a5);
+      }
+      return 0;
     } else if ((a1 == 1) || // write
 	(a1 == 9) || // mmap
 	(a1 == 12) || // brk
@@ -408,6 +622,9 @@ long hook_function(long a1, long a2, long a3,
       return helpers[abt_id].ret;
     }
   } else {
+    if ((a1 == 1) || (a1 == 18)) {
+      printf("outside write %ld %ld\n", a1, a2);
+    }
     return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
   }
 }

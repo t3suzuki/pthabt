@@ -9,4 +9,4 @@ int nvme_write_check(int lba, int qid, int cid);
 
 int nvme_init(int did, int uio_index);
 
-#endif __NVME_H__
+#endif
