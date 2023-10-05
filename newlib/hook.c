@@ -111,7 +111,7 @@ size_t cur_pos[MAX_HOOKFD];
 void
 read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 {
-  int qid = get_qid();
+  int tid = get_tid();
   assert(pos % 512 == 0);
   int blksz = ((len % BLKSZ != 0) || (pos % BLKSZ != 0)) ? 512 : BLKSZ;
   
@@ -121,9 +121,9 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
     if (lba == JUST_ALLOCATED) {
       memset(buf + j, 0, MIN(blksz, len - j));
     } else {
-      int cid = nvme_read_req(lba, blksz/512, qid, MIN(blksz, len - j), buf + j);
+      int rid = nvme_read_req(lba, blksz/512, tid, MIN(blksz, len - j), buf + j);
       while (1) {
-	if (nvme_read_check(lba, qid, cid))
+	if (nvme_check(rid))
 	  break;
 	ABT_thread_yield();
       }
@@ -134,16 +134,16 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 void
 write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 {
-  int qid = get_qid();
+  int tid = get_tid();
   assert(pos % 512 == 0);
   int blksz = ((len % BLKSZ != 0) || (pos % BLKSZ != 0)) ? 512 : BLKSZ;
   
   int j;
   for (j=0; j<len; j+=blksz) {
     int lba = myfs_get_lba(hookfd, pos + j, 0);
-    int cid = nvme_read_req(lba, blksz/512, qid, MIN(blksz, len - j), buf + j);
+    int rid = nvme_write_req(lba, blksz/512, tid, MIN(blksz, len - j), buf + j);
     while (1) {
-      if (nvme_read_check(lba, qid, cid))
+      if (nvme_check(rid))
 	break;
       ABT_thread_yield();
     }
@@ -166,9 +166,13 @@ long hook_function(long a1, long a2, long a3,
   uint64_t abt_id;
   int ret = ABT_self_get_thread_id(&abt_id);
   if (ret == ABT_SUCCESS && (abt_id >= 0)) {
+
+    /*
     if (a1 != 1) {
       printf("call %ld %ld\n", a1, abt_id);
     }
+    */
+
     if (debug_print) {
       debug_print(1, a1, abt_id);
     }
@@ -319,9 +323,9 @@ long hook_function(long a1, long a2, long a3,
 	int j;
 	for (j=0; j<count; j+=512) {
 	  int lba = myfs_get_lba(hookfds[a2], cur_pos[a2] + j, 0);
-	  int cid = nvme_read_req(lba, 1, qid, MIN(512, count - j), a3 + 512);
+	  int rid = nvme_read_req(lba, 1, qid, MIN(512, count - j), a3 + 512);
 	  while (1) {
-	    if (nvme_read_check(lba, qid, cid))
+	    if (nvme_check(rid))
 	      break;
 	    ABT_thread_yield();
 	  }
@@ -370,11 +374,11 @@ long hook_function(long a1, long a2, long a3,
 	for (j=0; j<count; j+=blksz) {
 	  lba = myfs_get_lba(hookfds[a2], pos + j, 0);
 	  //printf("pread64 fd=%d, sz=%ld, pos=%ld lba=%lu\n", a2, count, pos, lba);
-	  int cid = nvme_read_req(lba, blksz/512, qid, MIN(blksz, count - j), a3 + j);
+	  int rid = nvme_read_req(lba, blksz/512, qid, MIN(blksz, count - j), a3 + j);
 	  while (1) {
 	    if (debug_print)
 	      debug_print(876, 0, 0);
-	    if (nvme_read_check(lba, qid, cid))
+	    if (nvme_check(lba, qid, rid))
 		break;
 	    ABT_thread_yield();
 	  }
@@ -469,7 +473,7 @@ long hook_function(long a1, long a2, long a3,
       }
 #endif
     } else if (a1 == 262) { // fstat
-      printf("fstat %ld\n", a2);
+      //printf("fstat %ld\n", a2);
       if (((int32_t)a2 >= 0) && (hookfds[a2] >= 0)) {
 	int sz = myfs_get_size(a2);
 	struct stat *statbuf = (struct stat*)a4;
@@ -483,26 +487,35 @@ long hook_function(long a1, long a2, long a3,
       int min_nr = a3;
       int nr = a4;
       int completed = 0;
+      //printf("hogehoge\n");
       struct io_event *events = (struct io_event *)a5;
       while (completed < nr) {
 	if (cur_aio_wp == cur_aio_rp) {
 	  break;
 	}
-	printf("cur_aio_wp = %d, cur_aio_rp = %d\n", cur_aio_wp, cur_aio_rp);
-	uint64_t v = cur_aios[cur_aio_rp]->aio_reserved2;
-	int qid = v & 0xffffffff;
-	int cid = v >> 32;
-	if (cid != JUST_ALLOCATED) {
+	//printf("cur_aio_wp = %d, cur_aio_rp = %d\n", cur_aio_wp, cur_aio_rp);
+	int rid = cur_aios[cur_aio_rp]->aio_reserved2;
+	if (rid != JUST_ALLOCATED) {
 	  int fd = cur_aios[cur_aio_rp]->aio_fildes;
 	  uint64_t pos = cur_aios[cur_aio_rp]->aio_offset;
 	  int lba = myfs_get_lba(hookfds[fd], pos, 0);
-	  printf("io_getevents fd=%d cid=%d pos=%lu lba=%u qid=%d\n", fd, cid, pos, lba, qid);
-	  if (nvme_read_check(lba, qid, cid) == 0)
+	  //printf("io_getevents fd=%d cid=%d pos=%lu lba=%u qid=%d\n", fd, cid, pos, lba, qid);
+	  while (1) {
+	    if (nvme_check(rid))
+	      break;
 	    ABT_thread_yield();
+	  }
 	}
-	printf("%s %d completed%d\n", __func__, __LINE__, completed);
+	//printf("%s %d completed%d\n", __func__, __LINE__, completed);
 	events[completed].data = cur_aios[cur_aio_rp]->aio_buf;
 	events[completed].obj = (uint64_t)cur_aios[cur_aio_rp];
+	//printf("io_submitted callback %lx rp %d\n", cur_aios[cur_aio_rp], cur_aio_rp);
+	if (0) {
+	  struct iocb *cb = (void*)events[completed].obj;
+	  struct slab_callback *callback = (void*)cb->aio_data;
+	  printf("io_getevents callback %p\n", callback);
+	  debug_item(cb->aio_data);
+	}
 	events[completed].res = cur_aios[cur_aio_rp]->aio_nbytes;
 	events[completed].res2 = 0;
 	completed++;
@@ -510,10 +523,10 @@ long hook_function(long a1, long a2, long a3,
 	if (completed == nr)
 	  break;
       }
-      printf("%d\n", completed);
+      //printf("completed %d\n", completed);
       return completed;
     } else if (a1 == 209) { // io_submit
-      int qid = get_qid();
+      int tid = get_tid();
       struct iocb **ios = (struct iocb **)a4;
       int n_io = a3;
       int i;
@@ -521,8 +534,10 @@ long hook_function(long a1, long a2, long a3,
 	if ((cur_aio_wp + 1) % cur_aio_max == cur_aio_rp) {
 	  break;
 	}
-	printf("cur_aio_wp = %d\n", cur_aio_wp);
+	//printf("cur_aio_wp = %d\n", cur_aio_wp);
 	cur_aios[cur_aio_wp] = ios[i];
+	//printf("io_submitted %p callback %lx wp %d\n", ios[i], ios[i]->aio_data, cur_aio_wp);
+	//debug_item(ios[i]->aio_data);
 	cur_aio_wp = (cur_aio_wp + 1) % cur_aio_max;
 	int fd = ios[i]->aio_fildes;
 	int op = ios[i]->aio_lio_opcode;
@@ -536,19 +551,27 @@ long hook_function(long a1, long a2, long a3,
 	  int32_t lba = myfs_get_lba(hookfds[fd], pos, 0);
 	  if (lba == JUST_ALLOCATED) {
 	    memset(buf, 0, len);
-	    ios[i]->aio_reserved2 = ((uint64_t)JUST_ALLOCATED << 32) | qid;
-	    printf("io_submit read op=%d fd=%d, sz=%ld, pos=%ld lba=%d JUST_ALLOCATED\n", op, fd, len, pos, lba);
+	    ios[i]->aio_reserved2 = JUST_ALLOCATED;
+	    //printf("io_submit read op=%d fd=%d, sz=%ld, pos=%ld lba=%d JUST_ALLOCATED\n", op, fd, len, pos, lba);
 	  } else {
-	    int cid = nvme_read_req(lba, blksz/512, qid, MIN(blksz, len), buf);
-	    printf("io_submit read op=%d fd=%d, sz=%ld, pos=%ld lba=%d cid=%d qid=%d\n", op, fd, len, pos, lba, cid, qid);
-	    ios[i]->aio_reserved2 = ((uint64_t)cid << 32) | qid;
+	    int rid = nvme_read_req(lba, blksz/512, tid, MIN(blksz, len), buf);
+	    //printf("io_submit read op=%d fd=%d, sz=%ld, pos=%ld lba=%d rid=%d\n", op, fd, len, pos, lba, rid);
+	    ios[i]->aio_reserved2 = rid;
 	  }
 	}
 	if (op == IOCB_CMD_PWRITE) {
 	  int32_t lba = myfs_get_lba(hookfds[fd], pos, 1);
-	  int cid = nvme_write_req(lba, blksz/512, qid, MIN(blksz, len), buf);
-	  printf("io_submit write op=%d fd=%d, sz=%ld, pos=%ld lba=%d cid=%d qid=%d\n", op, fd, len, pos, lba, cid, qid);
-	  ios[i]->aio_key = cid;
+	  int rid = nvme_write_req(lba, blksz/512, tid, MIN(blksz, len), buf);
+	  //printf("io_submit write op=%d fd=%d, sz=%ld, pos=%ld lba=%d rid=%d\n", op, fd, len, pos, lba, rid);
+	  ios[i]->aio_reserved2 = rid;
+#if 0
+	  debug_item(ios[i]->aio_data);
+	  if (nvme_check(rid) == 0)
+	    ABT_thread_yield();
+	  ios[i]->aio_reserved2 = JUST_ALLOCATED;
+	  debug_item(ios[i]->aio_data);
+#endif
+	  
 	}
       }
       return i;//return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -563,15 +586,12 @@ long hook_function(long a1, long a2, long a3,
       printf("io_destroy %ld %p\n", a2, (void *)a3);
       return 0;
     } else if (a1 == 285) { // fallocate
-      int rank;
-      ABT_xstream_self_rank(&rank);
-      int qid = rank + 1;
       int fd = a2;
       loff_t pos = a4;
       loff_t len = a5;
-      printf("fd=%ld mode=%ld offset=%ld len=%ld\n", a2, a3, a4, a5);
+      printf("fallocate fd=%d mode=%ld offset=%ld len=%ld\n", fd, a3, pos, len);
       if (hookfds[fd] >= 0) {
-	myfs_allocate(hookfds[fd], a5);
+	myfs_allocate(hookfds[fd], len);
       }
       return 0;
     } else if ((a1 == 1) || // write

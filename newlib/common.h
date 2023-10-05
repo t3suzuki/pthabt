@@ -15,11 +15,11 @@ extern void (*debug_print)(int, int, int);
 
 #include <abt.h>
 
-static inline int get_qid()
+static inline int get_tid()
 {
   int rank;
   ABT_xstream_self_rank(&rank);
-  return rank + 1;
+  return rank;
 }
 
 #define INACTIVE_BLOCK (-1)

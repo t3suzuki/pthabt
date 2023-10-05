@@ -102,7 +102,7 @@ myfs_allocate(int i, long offset)
 {
   int i_block = 0;
   while (1) {
-    if (i_block * MYFS_BLOCK_SIZE > offset) {
+    if ((uint64_t)i_block * MYFS_BLOCK_SIZE > offset) {
       break;
     }
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
@@ -145,7 +145,7 @@ myfs_get_lba_old(int i, uint64_t offset, int write) {
       printf("assign new block %d\n", superblock->file[i].block[i_block]);
     }
   }
-  printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
+  //printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
   int lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (offset % MYFS_BLOCK_SIZE)) / 512;
   return lba;
 }
@@ -159,13 +159,13 @@ myfs_get_lba(int i, uint64_t offset, int write) {
     if (superblock->file[i].block[i_block] == JUST_ALLOCATED) {
       if (write) {
 	superblock->file[i].block[i_block] = superblock->block_wp++;
-	int qid = get_qid();
+	int tid = get_tid();
 	for (int j=0; j<MYFS_BLOCK_SIZE; j+=BLKSZ) {
 	  int lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (j % MYFS_BLOCK_SIZE)) / 512;
-	  int cid = nvme_write_req(lba, BLKSZ/512, qid, BLKSZ, zbuf);
+	  int rid = nvme_write_req(lba, BLKSZ/512, tid, BLKSZ, zbuf);
 	  while (1) {
-	    if (nvme_write_check(lba, qid, cid))
-	    break;
+	    if (nvme_check(rid))
+	      break;
 	    ABT_thread_yield();
 	  }
 	}
@@ -180,7 +180,7 @@ myfs_get_lba(int i, uint64_t offset, int write) {
       return JUST_ALLOCATED;
     }
   }
-  printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
+  //printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
   int lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (offset % MYFS_BLOCK_SIZE)) / 512;
   return lba;
 }

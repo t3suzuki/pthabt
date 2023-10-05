@@ -26,22 +26,7 @@ extern "C" {
 #define RAID_FACTOR (4096 / 512)
 #define N_2MB_PAGE MAX(QD * BLKSZ / (2*1024*1024), 1)
 
-static uint64_t stat_read_count[NQ+1];
-static double stat_read_lasttime[NQ+1];
 
-void increment_read_count(int qid) {
-  stat_read_count[qid]++;
-  struct timespec tsc;
-  if (stat_read_count[qid] % (1024*1024) == 0) {
-    clock_gettime(CLOCK_MONOTONIC, &tsc);
-    double cur = tsc.tv_sec + tsc.tv_nsec * 1e-9;
-    double delta = cur - stat_read_lasttime[qid];
-    printf("th=%d, delta=%f, %f KIOPS\n", qid, delta, 1024*1024/delta/1000);
-    stat_read_lasttime[qid] = cur;
-  }
-}
-
-  
 static int enable_bus_master(int uio_index)
 {
   char path[256];
@@ -152,6 +137,9 @@ private:
   int _qid;
   volatile uint32_t *_regs32;
   volatile uint64_t *_regs64;
+  
+  uint64_t stat_read_count;
+  double stat_read_lasttime;
 public:
   void *rbuf[QD];
   int len[QD];
@@ -202,8 +190,9 @@ public:
   sqe_t *new_sqe(int *ret_cid = nullptr) {
     sqe_t *sqe = get_sqe(sq_tail);
     int new_sq_tail = (sq_tail + 1) % n_sqe;
+    //printf("new_sqe %d %d->%d %d %p\n", __LINE__, sq_tail, new_sq_tail, cq_head, this);
     if (done_flag[sq_tail] == 0) {
-      //printf("block %d %d\n", new_sq_tail, cq_head);
+      printf("block %d %d\n", new_sq_tail, cq_head);
       while (done_flag[sq_tail] == 0) {
 	check_cq();
       }
@@ -212,8 +201,9 @@ public:
     if (ret_cid) {
       *ret_cid = sq_tail;
     }
-    //printf("new_sqe %d %d\n", new_sq_tail, cq_head);
+    //printf("new_sqe %d %d->%d %d %p\n", __LINE__, sq_tail, new_sq_tail, cq_head, this);
     sq_tail = new_sq_tail;
+    //printf("new_sqe %d %d->%d %d %p\n", __LINE__, sq_tail, new_sq_tail, cq_head, this);
     return sqe;
   }
   void sq_doorbell() {
@@ -225,6 +215,19 @@ public:
     int cid_lower = cid / N_2MB_PAGE;
     return buf4k[cid_upper] + BLKSZ * cid_lower;
   }
+  
+  void increment_read_count() {
+    stat_read_count++;
+    struct timespec tsc;
+    if (stat_read_count % (1024*1024) == 0) {
+      clock_gettime(CLOCK_MONOTONIC, &tsc);
+      double cur = tsc.tv_sec + tsc.tv_nsec * 1e-9;
+      double delta = cur - stat_read_lasttime;
+      printf("n_th %d, delta=%f, %f KIOPS\n", _qid, delta, 1024*1024/delta/1000);
+      stat_read_lasttime = cur;
+    }
+  }
+  
   void check_cq() {
     /*
     if (cq_head < 0) {
@@ -262,6 +265,7 @@ public:
 	//sq_head = cqe->SQHD;
 	if (rbuf[cid]) {
 	  memcpy(rbuf[cid], get_buf4k(cid), len[cid]);
+	  increment_read_count();
 	  /* {
 	    unsigned char *buf = (unsigned char *)rbuf[cid];
 	    printf("buf = %p\n", buf);
@@ -417,9 +421,10 @@ nvme_init(int did, int uio_index)
 }
 
 int
-nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
+nvme_read_req(uint32_t lba, int num_blk, int tid, int len, char *buf)
 {
   int cid;
+  int qid = tid + 1;
   int did = (lba / RAID_FACTOR) % ND;
 
   QP *qp = qps[did][qid];  
@@ -434,7 +439,6 @@ nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
   //sqe->CDW0.CID = ((lba & 0xff) << 8) | cid;
   //if (debug_print)
   //debug_print(520, lba, cid);
-  //printf("read_req qid = %d cid = %d lba = %d\n", qid, cid, lba);
   /*
   bzero(qps[qid]->get_buf4k(cid), 512);
   {
@@ -452,9 +456,12 @@ nvme_read_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
   qp->rbuf[cid] = buf;
   qp->len[cid] = len;
   qp->sq_doorbell();
-  return cid;
+  int rid = did*QD*NQ + tid*QD + cid;
+  //printf("%s rid = %d lba = %d did=%d,tid=%d,cid=%d\n", __func__, rid, lba, did, tid, cid);
+  return rid;
 }
 
+#if 0
 int
 nvme_read_check(int lba, int qid, int cid)
 {
@@ -476,10 +483,28 @@ nvme_read_check(int lba, int qid, int cid)
   }
   return 0;
 }
+#endif
 
 int
-nvme_write_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
+nvme_check(int rid)
 {
+  int did = rid / QD / NQ;
+  int qid = (rid / QD) % NQ + 1;
+  int cid = rid % QD;
+  //printf("%s %d rid=%d did=%d qid=%d\n", __func__, __LINE__, rid, did, qid);
+  QP *qp = qps[did][qid];
+  unsigned char c = qp->get_buf4k(cid)[0];
+  qp->check_cq();
+  if (qp->done(cid)) {
+    return 1;
+  }
+  return 0;
+}
+
+int
+nvme_write_req(uint32_t lba, int num_blk, int tid, int len, char *buf)
+{
+  int qid = tid + 1;
   int cid;
   int did = (lba / RAID_FACTOR) % ND;
   QP *qp = qps[did][qid];
@@ -493,9 +518,12 @@ nvme_write_req(uint32_t lba, int num_blk, int qid, int len, char *buf)
   qp->rbuf[cid] = NULL;
   qp->len[cid] = 0;
   qp->sq_doorbell();
-  return cid;
+  int rid = did*QD*NQ + tid*QD + cid;
+  //printf("%s rid = %d lba = %d\n", __func__, rid, lba);
+  return rid;
 }
 
+#if 0
 int
 nvme_write_check(int lba, int qid, int cid)
 {
@@ -508,6 +536,7 @@ nvme_write_check(int lba, int qid, int cid)
   }
   return 0;
 }
+#endif
 
   
 #if 0
