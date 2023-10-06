@@ -514,7 +514,7 @@ long hook_function(long a1, long a2, long a3,
 	  struct iocb *cb = (void*)events[completed].obj;
 	  struct slab_callback *callback = (void*)cb->aio_data;
 	  printf("io_getevents callback %p\n", callback);
-	  debug_item(cb->aio_data);
+	  debug_item(111, cb->aio_data);
 	}
 	events[completed].res = cur_aios[cur_aio_rp]->aio_nbytes;
 	events[completed].res2 = 0;
@@ -536,11 +536,11 @@ long hook_function(long a1, long a2, long a3,
 	}
 	//printf("cur_aio_wp = %d\n", cur_aio_wp);
 	cur_aios[cur_aio_wp] = ios[i];
-	//printf("io_submitted %p callback %lx wp %d\n", ios[i], ios[i]->aio_data, cur_aio_wp);
-	//debug_item(ios[i]->aio_data);
+	//debug_item(112, ios[i]->aio_data);
 	cur_aio_wp = (cur_aio_wp + 1) % cur_aio_max;
 	int fd = ios[i]->aio_fildes;
 	int op = ios[i]->aio_lio_opcode;
+	//printf("io_submitted %p callback %lx wp %d rd?=%d\n", ios[i], ios[i]->aio_data, cur_aio_wp, op == IOCB_CMD_PREAD);
 	char *buf = (char *)ios[i]->aio_buf;
 	uint64_t len = ios[i]->aio_nbytes;
 	uint64_t pos = ios[i]->aio_offset;
@@ -557,6 +557,14 @@ long hook_function(long a1, long a2, long a3,
 	    int rid = nvme_read_req(lba, blksz/512, tid, MIN(blksz, len), buf);
 	    //printf("io_submit read op=%d fd=%d, sz=%ld, pos=%ld lba=%d rid=%d\n", op, fd, len, pos, lba, rid);
 	    ios[i]->aio_reserved2 = rid;
+#if 0
+	  while (1) {
+	    if (nvme_check(rid))
+	      break;
+	    ABT_thread_yield();
+	  }
+	  ios[i]->aio_reserved2 = JUST_ALLOCATED;
+#endif
 	  }
 	}
 	if (op == IOCB_CMD_PWRITE) {
@@ -565,11 +573,14 @@ long hook_function(long a1, long a2, long a3,
 	  //printf("io_submit write op=%d fd=%d, sz=%ld, pos=%ld lba=%d rid=%d\n", op, fd, len, pos, lba, rid);
 	  ios[i]->aio_reserved2 = rid;
 #if 0
-	  debug_item(ios[i]->aio_data);
-	  if (nvme_check(rid) == 0)
+	  //debug_item(114, ios[i]->aio_data);
+	  while (1) {
+	    if (nvme_check(rid))
+	      break;
 	    ABT_thread_yield();
+	  }
 	  ios[i]->aio_reserved2 = JUST_ALLOCATED;
-	  debug_item(ios[i]->aio_data);
+	  //debug_item(115, ios[i]->aio_data);
 #endif
 	  
 	}
