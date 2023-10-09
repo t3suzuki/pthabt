@@ -66,7 +66,9 @@ void do_helper(void *arg) {
   }
 }
 
-#define FOR_KVELL (1)
+//#define FOR_KVELL (1)
+#define FOR_ROCKSDB (1)
+//#define FOR_FIO (1)
 
 int openat_file(char *filename)
 {
@@ -101,8 +103,8 @@ static int cur_aio_wp;
 static int cur_aio_rp;
 static int cur_aio_max;
 
-#define MAX_HOOKFD (256)
-int hookfd = -1;
+#define MAX_HOOKFD (1024)
+//int hookfd = -1;
 int hookfds[MAX_HOOKFD];
 //const int lba_file_offset = 2ULL * 1024 * 1024 * 1024 / 512;
 const int lba_file_offset = 0;
@@ -112,7 +114,14 @@ void
 read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 {
   int tid = get_tid();
+#if 0
+  if (pos % 512 != 0) {
+    printf("error len %lu pos %lu %lu\n", len, pos, cur_pos[hookfd]);
+    assert(0);
+  }
+#else
   assert(pos % 512 == 0);
+#endif
   int blksz = ((len % BLKSZ != 0) || (pos % BLKSZ != 0)) ? 512 : BLKSZ;
   
   int j;
@@ -140,7 +149,8 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
   
   int j;
   for (j=0; j<len; j+=blksz) {
-    int lba = myfs_get_lba(hookfd, pos + j, 0);
+    int lba = myfs_get_lba(hookfd, pos + j, 1);
+    //printf("%s %d %lu %lu pos =%lu\n", __func__, __LINE__, len, j, pos);
     int rid = nvme_write_req(lba, blksz/512, tid, MIN(blksz, len - j), buf + j);
     while (1) {
       if (nvme_check(rid))
@@ -510,10 +520,11 @@ long hook_function(long a1, long a2, long a3,
 	events[completed].data = cur_aios[cur_aio_rp]->aio_buf;
 	events[completed].obj = (uint64_t)cur_aios[cur_aio_rp];
 	//printf("io_submitted callback %lx rp %d\n", cur_aios[cur_aio_rp], cur_aio_rp);
-	if (0) {
+	if (1) {
 	  struct iocb *cb = (void*)events[completed].obj;
 	  struct slab_callback *callback = (void*)cb->aio_data;
-	  printf("io_getevents callback %p\n", callback);
+	  int op = cb->aio_lio_opcode;
+	  printf("io_getevents callback %p rd=%d rid=%d\n", callback, op == IOCB_CMD_PREAD, rid);
 	  debug_item(111, cb->aio_data);
 	}
 	events[completed].res = cur_aios[cur_aio_rp]->aio_nbytes;
@@ -534,10 +545,7 @@ long hook_function(long a1, long a2, long a3,
 	if ((cur_aio_wp + 1) % cur_aio_max == cur_aio_rp) {
 	  break;
 	}
-	//printf("cur_aio_wp = %d\n", cur_aio_wp);
-	cur_aios[cur_aio_wp] = ios[i];
-	//debug_item(112, ios[i]->aio_data);
-	cur_aio_wp = (cur_aio_wp + 1) % cur_aio_max;
+
 	int fd = ios[i]->aio_fildes;
 	int op = ios[i]->aio_lio_opcode;
 	//printf("io_submitted %p callback %lx wp %d rd?=%d\n", ios[i], ios[i]->aio_data, cur_aio_wp, op == IOCB_CMD_PREAD);
@@ -584,6 +592,10 @@ long hook_function(long a1, long a2, long a3,
 #endif
 	  
 	}
+	//printf("cur_aio_wp = %d\n", cur_aio_wp);
+	cur_aios[cur_aio_wp] = ios[i];
+	debug_item(112, ios[i]->aio_data);
+	cur_aio_wp = (cur_aio_wp + 1) % cur_aio_max;
       }
       return i;//return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else if (a1 == 206) { // io_setup
@@ -597,6 +609,7 @@ long hook_function(long a1, long a2, long a3,
       printf("io_destroy %ld %p\n", a2, (void *)a3);
       return 0;
     } else if (a1 == 285) { // fallocate
+#if 1
       int fd = a2;
       loff_t pos = a4;
       loff_t len = a5;
@@ -605,6 +618,9 @@ long hook_function(long a1, long a2, long a3,
 	myfs_allocate(hookfds[fd], len);
       }
       return 0;
+#else
+      return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+#endif
     } else if ((a1 == 1) || // write
 	(a1 == 9) || // mmap
 	(a1 == 12) || // brk
@@ -695,6 +711,8 @@ int __hook_init(long placeholder __attribute__((unused)),
 
   nvme_init(0, 16);
   nvme_init(1, 17);
+  nvme_init(2, 18);
+  nvme_init(3, 19);
   
   return 0;
 
