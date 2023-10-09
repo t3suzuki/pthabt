@@ -142,7 +142,7 @@ myfs_get_lba_old(int i, uint64_t offset, int write) {
   if (write > 0) {
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
       superblock->file[i].block[i_block] = superblock->block_wp++;
-      printf("assign new block %d\n", superblock->file[i].block[i_block]);
+      //printf("assign new block %d\n", superblock->file[i].block[i_block]);
     }
   }
   //printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
@@ -173,7 +173,7 @@ myfs_get_lba(int i, uint64_t offset, int write) {
     }
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
       superblock->file[i].block[i_block] = superblock->block_wp++;
-      printf("assign new block %d\n", superblock->file[i].block[i_block]);
+      //printf("assign new block %d\n", superblock->file[i].block[i_block]);
     }
   } else {
     if (superblock->file[i].block[i_block] == JUST_ALLOCATED) {
