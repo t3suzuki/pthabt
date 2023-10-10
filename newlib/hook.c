@@ -123,6 +123,10 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
   assert(pos % 512 == 0);
 #endif
   int blksz = ((len % BLKSZ != 0) || (pos % BLKSZ != 0)) ? 512 : BLKSZ;
+  if ((pos % BLKSZ) + len <= BLKSZ) {
+    blksz = len;
+  }
+  //printf("%s %d %lu %lu\n", __func__, __LINE__, len, pos);
   
   int j;
   for (j=0; j<len; j+=blksz) {
