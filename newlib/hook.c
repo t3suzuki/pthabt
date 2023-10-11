@@ -182,7 +182,7 @@ long hook_function(long a1, long a2, long a3,
   if (ret == ABT_SUCCESS && (abt_id >= 0)) {
 
     /*
-    if (a1 != 1) {
+    if ((a1 != 1) && (a1 != 17) && (a1 != 18)) {
       printf("call %ld %ld\n", a1, abt_id);
     }
     */
@@ -275,9 +275,11 @@ long hook_function(long a1, long a2, long a3,
 	
 	int i;
 	char *filename = (char*)a3;
+	/*
 	for (i=0; i<16; i++) {
 	  printf("%c", filename[i]);
 	}
+	*/
 	printf("%s \n", filename);
 	if (ret < MAX_HOOKFD) {
 	  hookfds[ret] = myfs_open((char *)a3);
@@ -292,7 +294,7 @@ long hook_function(long a1, long a2, long a3,
     } else if (a1 == 3) { // close
       if (hookfds[a2] >= 0) {
 	printf("close for mylib: fd=%ld\n", a2);
-	myfs_set_size(hookfds[a2], cur_pos[a2]);
+	//myfs_set_size(hookfds[a2], cur_pos[a2]);
 	hookfds[a2] = -1;
       }
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -489,10 +491,12 @@ long hook_function(long a1, long a2, long a3,
     } else if (a1 == 262) { // fstat
       //printf("fstat %ld\n", a2);
       if (((int32_t)a2 >= 0) && (hookfds[a2] >= 0)) {
-	int sz = myfs_get_size(a2);
+	int sz = myfs_get_size(hookfds[a2]);
 	struct stat *statbuf = (struct stat*)a4;
 	statbuf->st_size = sz;
-	printf("file size = %d fd=%ld\n", sz, a2);
+	statbuf->st_blocks = 512;
+	statbuf->st_blksize = sz / 512;
+	printf("file size = %ld fd=%ld\n", sz, a2);
 	return 0;
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -613,13 +617,14 @@ long hook_function(long a1, long a2, long a3,
       printf("io_destroy %ld %p\n", a2, (void *)a3);
       return 0;
     } else if (a1 == 285) { // fallocate
-#if 1
       int fd = a2;
+      int mode = a3;
       loff_t pos = a4;
       loff_t len = a5;
-      printf("fallocate fd=%d mode=%ld offset=%ld len=%ld\n", fd, a3, pos, len);
+      printf("fallocate fd=%d mode=%ld offset=%ld len=%ld\n", fd, mode, pos, len);
+#if 0
       if (hookfds[fd] >= 0) {
-	myfs_allocate(hookfds[fd], len);
+	myfs_allocate(hookfds[fd], mode, pos, len);
       }
       return 0;
 #else
@@ -716,7 +721,7 @@ int __hook_init(long placeholder __attribute__((unused)),
   nvme_init(0, 16);
   nvme_init(1, 17);
   nvme_init(2, 18);
-  nvme_init(3, 19);
+  nvme_init(3, 20);
   
   return 0;
 

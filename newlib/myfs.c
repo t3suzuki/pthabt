@@ -21,13 +21,14 @@
 typedef struct {
   char name[MYFS_MAX_NAMELEN];
   int32_t block[MYFS_MAX_BLOCKS_PER_FILE];
-  int32_t total_size;
+  uint64_t total_size;
+  uint64_t tail_block;
 } file_t;
 
 typedef struct {
   uint64_t magic;
+  uint64_t block_wp;
   file_t file[MYFS_MAX_FILES];
-  int block_wp;
 } superblock_t;
 
 
@@ -52,13 +53,14 @@ myfs_init()
 }
 
 void
-myfs_set_size(int i, int32_t sz) {
+myfs_set_size(int i, uint64_t sz) {
   superblock->file[i].total_size = sz;
 }
 
-int
+uint64_t
 myfs_get_size(int i) {
-  return superblock->file[i].total_size;
+  printf("file %d get tail_block %ld\n", i, superblock->file[i].tail_block);
+  return superblock->file[i].tail_block * MYFS_BLOCK_SIZE;
 }
 
 int
@@ -95,20 +97,26 @@ myfs_mount(char *myfs_superblock)
   if (superblock->magic != MAGIC) {
     myfs_init();
   }
+  printf("%s %d  wp=%ld\n", __func__, __LINE__, superblock->block_wp);
 }
 
 void
-myfs_allocate(int i, long offset)
+myfs_allocate(int i, int mode, long pos, long len)
 {
-  int i_block = 0;
+  int i_block = pos / MYFS_BLOCK_SIZE;
   while (1) {
-    if ((uint64_t)i_block * MYFS_BLOCK_SIZE > offset) {
+    if ((uint64_t)i_block * MYFS_BLOCK_SIZE > (pos + len)) {
       break;
     }
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
       superblock->file[i].block[i_block] = JUST_ALLOCATED;
     }
     i_block++;
+  }
+  if ((mode & FALLOC_FL_KEEP_SIZE) == 0) {
+    if (i_block > superblock->file[i].tail_block) {
+      superblock->file[i].tail_block = i_block;
+    }
   }
 }
 
@@ -130,19 +138,24 @@ myfs_open(char *filename)
   //printf("%s not found. fileid=%d\n", __func__, empty_i);
   strncpy(superblock->file[empty_i].name, filename, strlen(filename));
   superblock->file[empty_i].total_size = 0;
+  superblock->file[empty_i].tail_block = 0;
   return empty_i;
 }
 
 int
 myfs_get_lba_old(int i, uint64_t offset, int write) {
-  int i_block = offset / MYFS_BLOCK_SIZE;
+  uint64_t i_block = offset / MYFS_BLOCK_SIZE;
   if (superblock->file[i].block[i_block] == JUST_ALLOCATED) {
     return JUST_ALLOCATED;
   }
   if (write > 0) {
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
       superblock->file[i].block[i_block] = superblock->block_wp++;
-      //printf("assign new block %d\n", superblock->file[i].block[i_block]);
+      
+      if (i_block > superblock->file[i].tail_block) {
+	superblock->file[i].tail_block = i_block;
+	//printf("file %d update tail_block %ld\n", i, i_block);
+      }
     }
   }
   //printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
@@ -173,6 +186,12 @@ myfs_get_lba(int i, uint64_t offset, int write) {
     }
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
       superblock->file[i].block[i_block] = superblock->block_wp++;
+
+      if (i_block > superblock->file[i].tail_block) {
+	superblock->file[i].tail_block = i_block;
+	//printf("file %d update tail_block %ld\n", i, i_block);
+      }
+
       //printf("assign new block %d\n", superblock->file[i].block[i_block]);
     }
   } else {
@@ -189,7 +208,7 @@ void
 myfs_umount()
 {
   fsync(superblock_fd);
-  printf("%s %d\n", __func__, __LINE__);
+  printf("%s %d  wp=%ld\n", __func__, __LINE__, superblock->block_wp);
 }
 
 

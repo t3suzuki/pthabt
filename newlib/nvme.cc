@@ -12,13 +12,14 @@
 #include <vector>
 #include "common.h"
 #include <time.h>
+#include <zlib.h>
 
 //extern void (*debug_print)(long, long, long);
 
 extern "C" {
 #include "nvme.h"
   
-#define ND (2)
+#define ND (4)
 #define NQ (N_TH)
 #define QD (N_ULT*2)
 #define AQD (8)
@@ -192,7 +193,7 @@ public:
     int new_sq_tail = (sq_tail + 1) % n_sqe;
     //printf("new_sqe %d %d->%d %d %p\n", __LINE__, sq_tail, new_sq_tail, cq_head, this);
     if (done_flag[sq_tail] == 0) {
-      printf("block %d %d\n", new_sq_tail, cq_head);
+      //printf("block %d %d\n", new_sq_tail, cq_head);
       while (done_flag[sq_tail] == 0) {
 	check_cq();
       }
@@ -265,6 +266,10 @@ public:
 	//sq_head = cqe->SQHD;
 	if (rbuf[cid]) {
 	  memcpy(rbuf[cid], get_buf4k(cid), len[cid]);
+	  /*
+	  uint32_t checksum = crc32(0x80000000, (const unsigned char *)rbuf[cid], len[cid]);
+	  printf("cid=%d checksum=%08x len=%d\n", cid, checksum, len[cid]);
+	  */
 	  increment_read_count();
 	  /* {
 	    unsigned char *buf = (unsigned char *)rbuf[cid];
@@ -341,6 +346,7 @@ nvme_init(int did, int uio_index)
 {
   volatile uint32_t *regs32;
   volatile uint64_t *regs64;
+  const int wait_us = 100000;
 
   enable_bus_master(uio_index);
   
@@ -373,7 +379,7 @@ nvme_init(int did, int uio_index)
   
   cc = 0;
   regs32[0x14 / sizeof(uint32_t)] = cc; // cc disable
-  sleep(1);
+  usleep(wait_us);
   csts = regs32[0x1c / sizeof(uint32_t)]; // check csts
   printf("csts = %u\n", csts);
   
@@ -389,7 +395,7 @@ nvme_init(int did, int uio_index)
   // enable controller.
   cc = 0x460001;
   regs32[0x14 / sizeof(uint32_t)] = cc; // cc enable
-  sleep(3);
+  usleep(wait_us);
   csts = regs32[0x1c / sizeof(uint32_t)]; // check csts
   //printf("csts = %u\n", csts);
   assert(csts == 1);
@@ -457,7 +463,7 @@ nvme_read_req(uint32_t lba, int num_blk, int tid, int len, char *buf)
   qp->len[cid] = len;
   qp->sq_doorbell();
   int rid = did*QD*NQ + tid*QD + cid;
-  //printf("%s rid = %d lba = %d did=%d,tid=%d,cid=%d\n", __func__, rid, lba, did, tid, cid);
+  //printf("%s rid = %d lba = %d did=%d,tid=%d,cid=%d,buf=%p,len=%d\n", __func__, rid, lba, did, tid, cid, buf, len);
   return rid;
 }
 
@@ -519,7 +525,16 @@ nvme_write_req(uint32_t lba, int num_blk, int tid, int len, char *buf)
   qp->len[cid] = 0;
   qp->sq_doorbell();
   int rid = did*QD*NQ + tid*QD + cid;
-  //printf("%s rid = %d lba = %d\n", __func__, rid, lba);
+
+  /*
+  int o = 0;
+  while (o < len) {
+    uint32_t checksum = crc32(0x80000000, (const unsigned char *)buf + o, 1024);
+    o += 1024;
+    printf("offset=%d checksum=%08x\n", o, checksum);
+  }
+  */
+  //printf("%s rid = %d lba = %d buf=%p len=%d\n", __func__, rid, lba, buf, len);
   return rid;
 }
 
