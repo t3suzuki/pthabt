@@ -16,7 +16,7 @@
 
 #define MYFS_MAX_BLOCKS_PER_FILE (1024*32)
 #define MYFS_MAX_NAMELEN (1024)
-#define MYFS_MAX_FILES   (1024)
+#define MYFS_MAX_FILES   (1024*16)
 
 typedef struct {
   char name[MYFS_MAX_NAMELEN];
@@ -90,7 +90,7 @@ myfs_mount(char *myfs_superblock)
   }
   size_t page_size = getpagesize();
   //superblock = (superblock_t *)mmap(0, sizeof(superblock_t), PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
-  superblock = (superblock_t *)mmap(0, page_size*4096, PROT_READ|PROT_WRITE, MAP_SHARED, superblock_fd, 0);
+  superblock = (superblock_t *)mmap(0, page_size*16384*2, PROT_READ|PROT_WRITE, MAP_SHARED, superblock_fd, 0);
   if (superblock == MAP_FAILED)
     perror("mmap superblock file");
 
@@ -126,8 +126,8 @@ myfs_open(char *filename)
   int i;
   int empty_i = -1;
   for (i=0; i<MYFS_MAX_FILES; i++) {
+    //printf("%s check %s\n", __func__, superblock->file[i].name);
     if (strncmp(filename, superblock->file[i].name, strlen(filename)) == 0) {
-      //printf("%s found %s %s\n", __func__, filename, superblock->file[i].name);
       //printf("%s found %s fileid=%d\n", __func__, filename, i);
       return i;
     }
@@ -135,8 +135,8 @@ myfs_open(char *filename)
       empty_i = i;
     }
   }
-  //printf("%s not found. fileid=%d\n", __func__, empty_i);
-  strncpy(superblock->file[empty_i].name, filename, strlen(filename));
+  //printf("%s not found. fileid=%d %s\n", __func__, empty_i, filename);
+  strncpy(superblock->file[empty_i].name, filename, strlen(filename)+1);
   superblock->file[empty_i].total_size = 0;
   superblock->file[empty_i].tail_block = 0;
   return empty_i;
