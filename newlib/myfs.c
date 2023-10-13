@@ -114,8 +114,8 @@ myfs_allocate(int i, int mode, long pos, long len)
     i_block++;
   }
   if ((mode & FALLOC_FL_KEEP_SIZE) == 0) {
-    if (i_block > superblock->file[i].tail_block) {
-      superblock->file[i].tail_block = i_block;
+    if (i_block+1 > superblock->file[i].tail_block) {
+      superblock->file[i].tail_block = i_block+1;
     }
   }
 }
@@ -152,8 +152,8 @@ myfs_get_lba_old(int i, uint64_t offset, int write) {
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
       superblock->file[i].block[i_block] = superblock->block_wp++;
       
-      if (i_block > superblock->file[i].tail_block) {
-	superblock->file[i].tail_block = i_block;
+      if (i_block+1 > superblock->file[i].tail_block) {
+	superblock->file[i].tail_block = i_block+1;
 	//printf("file %d update tail_block %ld\n", i, i_block);
       }
     }
@@ -167,6 +167,7 @@ char zbuf[BLKSZ];
 
 int
 myfs_get_lba(int i, uint64_t offset, int write) {
+  //printf("%s %d %ld %d\n", __func__, i, offset, write);
   int i_block = offset / MYFS_BLOCK_SIZE;
   if (write > 0) {
     if (superblock->file[i].block[i_block] == JUST_ALLOCATED) {
@@ -187,9 +188,9 @@ myfs_get_lba(int i, uint64_t offset, int write) {
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
       superblock->file[i].block[i_block] = superblock->block_wp++;
 
-      if (i_block > superblock->file[i].tail_block) {
-	superblock->file[i].tail_block = i_block;
-	//printf("file %d update tail_block %ld\n", i, i_block);
+      if (i_block+1 > superblock->file[i].tail_block) {
+	superblock->file[i].tail_block = i_block+1;
+	//printf("file %d update tail_block %ld\n", i, i_block+1);
       }
 
       //printf("assign new block %d\n", superblock->file[i].block[i_block]);

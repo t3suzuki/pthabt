@@ -67,8 +67,9 @@ void do_helper(void *arg) {
 }
 
 //#define FOR_KVELL (1)
-#define FOR_ROCKSDB (1)
+//#define FOR_ROCKSDB (1)
 //#define FOR_FIO (1)
+#define FOR_WT (1)
 
 int openat_file(char *filename)
 {
@@ -154,7 +155,7 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
   int j;
   for (j=0; j<len; j+=blksz) {
     int lba = myfs_get_lba(hookfd, pos + j, 1);
-    //printf("%s %d %lu %lu pos =%lu\n", __func__, __LINE__, len, j, pos);
+    //printf("%s %d hookfd=%d len=%lu %lu pos =%lu\n", __func__, __LINE__, hookfd, len, j, pos);
     int rid = nvme_write_req(lba, blksz/512, tid, MIN(blksz, len - j), buf + j);
     while (1) {
       if (nvme_check(rid))
@@ -355,6 +356,7 @@ long hook_function(long a1, long a2, long a3,
       int hookfd = hookfds[a2];
       char *buf = (char *)a3;
       loff_t len = a4;
+      //printf("read %d\n", a2);
       if (hookfd >= 0) {
 	read_impl(hookfd, len, cur_pos[a2], buf);
 	cur_pos[a2] += len;
@@ -410,6 +412,7 @@ long hook_function(long a1, long a2, long a3,
       char *buf = (char *)a3;
       loff_t len = a4;
       loff_t pos = a5;
+      //printf("pread64 fd %d len %ld pos %ld\n", a2, len, pos);
       if (hookfd >= 0) {
 	read_impl(hookfd, len, pos, buf);
 	return len;
@@ -477,6 +480,7 @@ long hook_function(long a1, long a2, long a3,
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
 #else
+      //printf("pwrite64 %d\n", a2);
       int hookfd = hookfds[a2];
       char *buf = (char *)a3;
       loff_t len = a4;
@@ -489,14 +493,13 @@ long hook_function(long a1, long a2, long a3,
       }
 #endif
     } else if (a1 == 262) { // fstat
-      //printf("fstat %ld\n", a2);
       if (((int32_t)a2 >= 0) && (hookfds[a2] >= 0)) {
 	int sz = myfs_get_size(hookfds[a2]);
 	struct stat *statbuf = (struct stat*)a4;
 	statbuf->st_size = sz;
 	statbuf->st_blocks = 512;
 	statbuf->st_blksize = sz / 512;
-	printf("file size = %ld fd=%ld\n", sz, a2);
+	printf("fstat: file size = %ld fd=%ld\n", sz, a2);
 	return 0;
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -719,9 +722,11 @@ int __hook_init(long placeholder __attribute__((unused)),
   *((syscall_fn_t *) sys_call_hook_ptr) = hook_function;
 
   nvme_init(0, 16);
+  /*
   nvme_init(1, 17);
   nvme_init(2, 18);
   nvme_init(3, 20);
+  */
   
   return 0;
 
