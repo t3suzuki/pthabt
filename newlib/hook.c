@@ -67,35 +67,41 @@ void do_helper(void *arg) {
 }
 
 //#define FOR_KVELL (1)
-//#define FOR_ROCKSDB (1)
+#define FOR_ROCKSDB (1)
 //#define FOR_FIO (1)
 #define FOR_WT (1)
 
 int openat_file(char *filename)
 {
+  int ret = 0;
 #if FOR_FIO
 #define MYFILE ("myfile")
-  return (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
+  ret |= strncmp(MYFILE, filename, strlen(MYFILE)) == 0;
 #endif
 
 #if FOR_ROCKSDB
-#define MYDIR ("/tmp/myfile4/")
+#define MYDIR ("/home/tomoya-s/mountpoint/tomoya-s/rocksdb_abt400m/")
 #define MYSUFFIX (".sst")  
-  return ((strncmp(MYDIR, filename, strlen(MYDIR)) == 0) &&
+  ret |= ((strncmp(MYDIR, filename, strlen(MYDIR)) == 0) &&
 	  (strncmp(MYSUFFIX, filename + strlen(MYDIR) + 6, strlen(MYSUFFIX)) == 0));
+
+#define MYDIR5 ("/tmp/myfile5/")
+  ret |= ((strncmp(MYDIR5, filename, strlen(MYDIR5)) == 0) &&
+	  (strncmp(MYSUFFIX, filename + strlen(MYDIR5) + 6, strlen(MYSUFFIX)) == 0));
 #endif
 
 #if FOR_KVELL
 #define MYDIR ("/home/tomoya-s/mountpoint/tomoya-s/KVell/db/")
 #define MYPREFIX ("slab")  
-  return ((strncmp(MYDIR, filename, strlen(MYDIR)) == 0) &&
+  ret != ((strncmp(MYDIR, filename, strlen(MYDIR)) == 0) &&
 	  (strncmp(MYPREFIX, filename + strlen(MYDIR), strlen(MYPREFIX)) == 0));
 #endif
   
 #if FOR_WT
 #define MYFILE ("WT_TEST/test.wt")
-  return (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
+  ret != (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
 #endif
+  return ret;
 }
 
 
@@ -480,12 +486,13 @@ long hook_function(long a1, long a2, long a3,
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
 #else
-      //printf("pwrite64 %d\n", a2);
       int hookfd = hookfds[a2];
       char *buf = (char *)a3;
       loff_t len = a4;
       loff_t pos = a5;
+      //printf("pwrite64 %d hookfd=%d, len=%ld, pos=%ld\n", a2, hookfd, len, pos);
       if (hookfd >= 0) {
+	//printf("pwrite64 %d hookfd=%d, len=%ld, pos=%ld\n", a2, hookfd, len, pos);
 	write_impl(hookfd, len, pos, buf);
 	return len;
       } else {
@@ -494,7 +501,7 @@ long hook_function(long a1, long a2, long a3,
 #endif
     } else if (a1 == 262) { // fstat
       if (((int32_t)a2 >= 0) && (hookfds[a2] >= 0)) {
-	int sz = myfs_get_size(hookfds[a2]);
+	uint64_t sz = myfs_get_size(hookfds[a2]);
 	struct stat *statbuf = (struct stat*)a4;
 	statbuf->st_size = sz;
 	statbuf->st_blocks = 512;
@@ -531,12 +538,12 @@ long hook_function(long a1, long a2, long a3,
 	events[completed].data = cur_aios[cur_aio_rp]->aio_buf;
 	events[completed].obj = (uint64_t)cur_aios[cur_aio_rp];
 	//printf("io_submitted callback %lx rp %d\n", cur_aios[cur_aio_rp], cur_aio_rp);
-	if (1) {
+	if (0) {
 	  struct iocb *cb = (void*)events[completed].obj;
 	  struct slab_callback *callback = (void*)cb->aio_data;
 	  int op = cb->aio_lio_opcode;
 	  printf("io_getevents callback %p rd=%d rid=%d\n", callback, op == IOCB_CMD_PREAD, rid);
-	  debug_item(111, cb->aio_data);
+	  //debug_item(111, cb->aio_data);
 	}
 	events[completed].res = cur_aios[cur_aio_rp]->aio_nbytes;
 	events[completed].res2 = 0;
@@ -605,7 +612,7 @@ long hook_function(long a1, long a2, long a3,
 	}
 	//printf("cur_aio_wp = %d\n", cur_aio_wp);
 	cur_aios[cur_aio_wp] = ios[i];
-	debug_item(112, ios[i]->aio_data);
+	//debug_item(112, ios[i]->aio_data);
 	cur_aio_wp = (cur_aio_wp + 1) % cur_aio_max;
       }
       return i;//return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -624,7 +631,7 @@ long hook_function(long a1, long a2, long a3,
       int mode = a3;
       loff_t pos = a4;
       loff_t len = a5;
-      printf("fallocate fd=%d mode=%ld offset=%ld len=%ld\n", fd, mode, pos, len);
+      printf("fallocate fd=%d mode=%d offset=%ld len=%ld\n", fd, mode, pos, len);
 #if 0
       if (hookfds[fd] >= 0) {
 	myfs_allocate(hookfds[fd], mode, pos, len);
@@ -700,7 +707,7 @@ int __hook_init(long placeholder __attribute__((unused)),
 #ifdef MYDIR
   printf("hooked rocksdb name : %s\n", MYDIR);
 #endif
-  myfs_mount("myfs_superblock");
+  myfs_mount("/root/myfs_superblock");
 
   int i;
   for (i=0; i<MAX_HOOKFD; i++) {
@@ -722,8 +729,8 @@ int __hook_init(long placeholder __attribute__((unused)),
   *((syscall_fn_t *) sys_call_hook_ptr) = hook_function;
 
   nvme_init(0, 16);
+  nvme_init(1, 18);
   /*
-  nvme_init(1, 17);
   nvme_init(2, 18);
   nvme_init(3, 20);
   */

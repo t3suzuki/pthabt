@@ -19,7 +19,7 @@
 extern "C" {
 #include "nvme.h"
   
-#define ND (4)
+#define ND (2)
 #define NQ (N_TH)
 #define QD (N_ULT*2)
 #define AQD (8)

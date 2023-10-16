@@ -1,8 +1,11 @@
 
+N_TH ?= 1
+
 FLAGS = -O3 -g
 FLAGS += -fpic
+FLAGS += -DN_TH=$(N_TH)
 
-ABT_PATH=$(HOME)/argobots/install
+ABT_PATH ?= $(HOME)/argobots/install
 
 all:
 	g++ $(FLAGS) -c nvme.cc  -fno-exceptions -I $(ABT_PATH)/include
