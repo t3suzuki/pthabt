@@ -93,13 +93,13 @@ int openat_file(char *filename)
 #if FOR_KVELL
 #define MYDIR ("/home/tomoya-s/mountpoint/tomoya-s/KVell/db/")
 #define MYPREFIX ("slab")  
-  ret != ((strncmp(MYDIR, filename, strlen(MYDIR)) == 0) &&
+  ret |= ((strncmp(MYDIR, filename, strlen(MYDIR)) == 0) &&
 	  (strncmp(MYPREFIX, filename + strlen(MYDIR), strlen(MYPREFIX)) == 0));
 #endif
   
 #if FOR_WT
-#define MYFILE ("WT_TEST/test.wt")
-  ret != (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
+#define MYFILE ("/home/tomoya-s/mountpoint/tomoya-s/wt_abtOK250m/test.wt")
+  ret |= (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
 #endif
   return ret;
 }
@@ -113,8 +113,6 @@ static int cur_aio_max;
 #define MAX_HOOKFD (1024)
 //int hookfd = -1;
 int hookfds[MAX_HOOKFD];
-//const int lba_file_offset = 2ULL * 1024 * 1024 * 1024 / 512;
-const int lba_file_offset = 0;
 size_t cur_pos[MAX_HOOKFD];
 
 void
@@ -137,7 +135,7 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
   
   int j;
   for (j=0; j<len; j+=blksz) {
-    int lba = myfs_get_lba(hookfd, pos + j, 0);
+    int64_t lba = myfs_get_lba(hookfd, pos + j, 0);
     if (lba == JUST_ALLOCATED) {
       memset(buf + j, 0, MIN(blksz, len - j));
     } else {
@@ -160,7 +158,7 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
   
   int j;
   for (j=0; j<len; j+=blksz) {
-    int lba = myfs_get_lba(hookfd, pos + j, 1);
+    int64_t lba = myfs_get_lba(hookfd, pos + j, 1);
     //printf("%s %d hookfd=%d len=%lu %lu pos =%lu\n", __func__, __LINE__, hookfd, len, j, pos);
     int rid = nvme_write_req(lba, blksz/512, tid, MIN(blksz, len - j), buf + j);
     while (1) {
@@ -268,6 +266,7 @@ long hook_function(long a1, long a2, long a3,
 	ABT_thread_yield();
       }
     } else if (a1 == 257) { // openat
+      char *filename = (char*)a3;
       /*
       int i;
       for (i=0; i<4; i++) {
@@ -276,12 +275,12 @@ long hook_function(long a1, long a2, long a3,
       }
       printf("\n");
       */
+      //printf("%s \n", filename);
       if (openat_file((char*)a3)) {
 	ret = next_sys_call(a1, a2, a3, a4, a5, a6, a7);
 	printf("openat with mylib: fd=%d\n", ret);
 	
 	int i;
-	char *filename = (char*)a3;
 	/*
 	for (i=0; i<16; i++) {
 	  printf("%c", filename[i]);
@@ -345,7 +344,7 @@ long hook_function(long a1, long a2, long a3,
 	
 	int j;
 	for (j=0; j<count; j+=512) {
-	  int lba = myfs_get_lba(hookfds[a2], cur_pos[a2] + j, 0);
+	  int64_t lba = myfs_get_lba(hookfds[a2], cur_pos[a2] + j, 0);
 	  int rid = nvme_read_req(lba, 1, qid, MIN(512, count - j), a3 + 512);
 	  while (1) {
 	    if (nvme_check(rid))
@@ -384,7 +383,7 @@ long hook_function(long a1, long a2, long a3,
 	  debug_print(883, a2, pos);
 	int j;
 	int blksz = BLKSZ;
-	int lba = myfs_get_lba(hookfds[a2], pos, 0);
+	int64_t lba = myfs_get_lba(hookfds[a2], pos, 0);
 	if (count < 4096) {
 	  if ((lba % 8) * 512 + count > 4096) {
 	    blksz = 512;
@@ -472,7 +471,6 @@ long hook_function(long a1, long a2, long a3,
 	if (debug_print4)
 	  debug_print4(7, a2, a3, a4, a5);
 	for (j=0; j<count; j+=512) {
-	  //int cid = nvme_write_req(pos / 512 + j + a2 * lba_file_offset, 1, qid, 512, a3 + 512*j);
 	  int lba = myfs_get_lba(hookfds[fd], pos + j, 1);
 	  int cid = nvme_write_req(lba, 1, qid, MIN(512, count - j), a3 + j);
 	  while (1) {
@@ -526,7 +524,7 @@ long hook_function(long a1, long a2, long a3,
 	if (rid != JUST_ALLOCATED) {
 	  int fd = cur_aios[cur_aio_rp]->aio_fildes;
 	  uint64_t pos = cur_aios[cur_aio_rp]->aio_offset;
-	  int lba = myfs_get_lba(hookfds[fd], pos, 0);
+	  int64_t lba = myfs_get_lba(hookfds[fd], pos, 0);
 	  //printf("io_getevents fd=%d cid=%d pos=%lu lba=%u qid=%d\n", fd, cid, pos, lba, qid);
 	  while (1) {
 	    if (nvme_check(rid))
@@ -574,7 +572,7 @@ long hook_function(long a1, long a2, long a3,
 	assert(hookfds[fd] >= 0);
 	
 	if (op == IOCB_CMD_PREAD) {
-	  int32_t lba = myfs_get_lba(hookfds[fd], pos, 0);
+	  int64_t lba = myfs_get_lba(hookfds[fd], pos, 0);
 	  if (lba == JUST_ALLOCATED) {
 	    memset(buf, 0, len);
 	    ios[i]->aio_reserved2 = JUST_ALLOCATED;
@@ -594,7 +592,7 @@ long hook_function(long a1, long a2, long a3,
 	  }
 	}
 	if (op == IOCB_CMD_PWRITE) {
-	  int32_t lba = myfs_get_lba(hookfds[fd], pos, 1);
+	  int64_t lba = myfs_get_lba(hookfds[fd], pos, 1);
 	  int rid = nvme_write_req(lba, blksz/512, tid, MIN(blksz, len), buf);
 	  //printf("io_submit write op=%d fd=%d, sz=%ld, pos=%ld lba=%d rid=%d\n", op, fd, len, pos, lba, rid);
 	  ios[i]->aio_reserved2 = rid;

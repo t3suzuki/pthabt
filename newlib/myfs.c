@@ -14,7 +14,7 @@
 
 #define MYFS_BLOCK_SIZE (2*1024*1024)
 
-#define MYFS_MAX_BLOCKS_PER_FILE (1024*32)
+#define MYFS_MAX_BLOCKS_PER_FILE (1024*256)
 #define MYFS_MAX_NAMELEN (1024)
 #define MYFS_MAX_FILES   (1024*16)
 
@@ -135,7 +135,7 @@ myfs_open(char *filename)
       empty_i = i;
     }
   }
-  //printf("%s not found. fileid=%d %s\n", __func__, empty_i, filename);
+  printf("%s not found. new fileid=%d for %s\n", __func__, empty_i, filename);
   strncpy(superblock->file[empty_i].name, filename, strlen(filename)+1);
   superblock->file[empty_i].total_size = 0;
   superblock->file[empty_i].tail_block = 0;
@@ -165,17 +165,17 @@ myfs_get_lba_old(int i, uint64_t offset, int write) {
 
 char zbuf[BLKSZ];
 
-int
+int64_t
 myfs_get_lba(int i, uint64_t offset, int write) {
-  //printf("%s %d %ld %d\n", __func__, i, offset, write);
   int i_block = offset / MYFS_BLOCK_SIZE;
+  //printf("%s %d offset=%ld write=%d block=%d tail=%d\n", __func__, i, offset, write, superblock->file[i].block[i_block], superblock->file[i].tail_block);
   if (write > 0) {
     if (superblock->file[i].block[i_block] == JUST_ALLOCATED) {
       if (write) {
 	superblock->file[i].block[i_block] = superblock->block_wp++;
 	int tid = get_tid();
 	for (int j=0; j<MYFS_BLOCK_SIZE; j+=BLKSZ) {
-	  int lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (j % MYFS_BLOCK_SIZE)) / 512;
+	  int64_t lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (j % MYFS_BLOCK_SIZE)) / 512;
 	  int rid = nvme_write_req(lba, BLKSZ/512, tid, BLKSZ, zbuf);
 	  while (1) {
 	    if (nvme_check(rid))
@@ -201,7 +201,7 @@ myfs_get_lba(int i, uint64_t offset, int write) {
     }
   }
   //printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
-  int lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (offset % MYFS_BLOCK_SIZE)) / 512;
+  int64_t lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (offset % MYFS_BLOCK_SIZE)) / 512;
   return lba;
 }
 

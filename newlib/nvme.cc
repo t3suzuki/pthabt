@@ -113,13 +113,6 @@ char *malloc_2MB()
   return buf;
 }
 
-  typedef struct {
-    int cid;
-    int done;
-    int len;
-    char *rbuf;
-  } req_t;
-
 class QP {
 public:
   int n_sqe;
@@ -144,6 +137,9 @@ private:
 public:
   void *rbuf[QD];
   int len[QD];
+#if DEBUG
+  int64_t lba[QD];
+#endif
   inline cqe_t *get_cqe(int index) {
     return (cqe_t *)(sqcq + 0x0) + index;
   }
@@ -268,7 +264,7 @@ public:
 	  memcpy(rbuf[cid], get_buf4k(cid), len[cid]);
 	  /*
 	  uint32_t checksum = crc32(0x80000000, (const unsigned char *)rbuf[cid], len[cid]);
-	  printf("cid=%d checksum=%08x len=%d\n", cid, checksum, len[cid]);
+	  printf("cid=%d checksum=%08x len=%d lba=%ld\n", cid, checksum, len[cid], lba[cid]);
 	  */
 	  increment_read_count();
 	  /* {
@@ -427,7 +423,7 @@ nvme_init(int did, int uio_index)
 }
 
 int
-nvme_read_req(uint32_t lba, int num_blk, int tid, int len, char *buf)
+nvme_read_req(int64_t lba, int num_blk, int tid, int len, char *buf)
 {
   int cid;
   int qid = tid + 1;
@@ -461,6 +457,9 @@ nvme_read_req(uint32_t lba, int num_blk, int tid, int len, char *buf)
   //printf("read_req qid=%d cid=%d lba=%d buf4k=%p buf4k[0]=%02x\n", qid, cid, lba, qps[qid]->get_buf4k(cid), qps[qid]->get_buf4k(cid)[0]);
   qp->rbuf[cid] = buf;
   qp->len[cid] = len;
+#if DEBUG
+  qp->lba[cid] = lba;
+  #endif
   qp->sq_doorbell();
   int rid = did*QD*NQ + tid*QD + cid;
   //printf("%s rid = %d lba = %d did=%d,tid=%d,cid=%d,buf=%p,len=%d\n", __func__, rid, lba, did, tid, cid, buf, len);
@@ -508,7 +507,7 @@ nvme_check(int rid)
 }
 
 int
-nvme_write_req(uint32_t lba, int num_blk, int tid, int len, char *buf)
+nvme_write_req(int64_t lba, int num_blk, int tid, int len, char *buf)
 {
   int qid = tid + 1;
   int cid;
@@ -529,9 +528,9 @@ nvme_write_req(uint32_t lba, int num_blk, int tid, int len, char *buf)
   /*
   int o = 0;
   while (o < len) {
-    uint32_t checksum = crc32(0x80000000, (const unsigned char *)buf + o, 1024);
-    o += 1024;
-    printf("offset=%d checksum=%08x\n", o, checksum);
+    uint32_t checksum = crc32(0x80000000, (const unsigned char *)buf + o, 4096);
+    o += 4096;
+    printf("[NVMe write req] offset=%d len=4096, checksum=%08x lba=%ld\n", o, checksum, lba);
   }
   */
   //printf("%s rid = %d lba = %d buf=%p len=%d\n", __func__, rid, lba, buf, len);
