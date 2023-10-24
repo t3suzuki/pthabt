@@ -200,8 +200,6 @@ long hook_function(long a1, long a2, long a3,
 	debug_print(666, a2, a3);
       if (a3 == 0) {
 	struct timespec *ts = (struct timespec *) a4;
-	if (debug_print)
-	  debug_print(871, ts->tv_sec, ts->tv_nsec);
 	struct timespec tsc;
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &tsc);
 	ts->tv_sec += tsc.tv_sec;
@@ -218,11 +216,6 @@ long hook_function(long a1, long a2, long a3,
       }
     }
     else if (a1 == 441) {
-      /*
-      if (debug_print) {
-	debug_print(1, a1, abt_id);
-      }
-      */
       struct timespec tsz = {.tv_sec = 0, .tv_nsec = 0};
       struct timespec *ts = (struct timespec *) a5;
       if (ts) {
@@ -230,35 +223,15 @@ long hook_function(long a1, long a2, long a3,
 	clock_gettime(CLOCK_MONOTONIC_COARSE, &tsc);
 	ts->tv_sec += tsc.tv_sec;
 	ts->tv_nsec += tsc.tv_nsec;
-	/*
-	if (debug_print) {
-	  debug_print(888, ts1->tv_sec, ts1->tv_nsec);
-	}
-	*/
       }
       while (1) {
-	/*
-	if (debug_print) {
-	  debug_print(5, abt_id, a5);
-	}
-	*/
 	int ret = next_sys_call(a1, a2, a3, a4, (long)&tsz, a6, a7);
-	/*
-	if (debug_print) {
-	  debug_print(6, abt_id, ret);
-	}
-	*/
 	if (ret > 0) {
 	  return ret;
 	}
 	if (ts) {
 	  struct timespec ts2;
 	  clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
-	  /*
-	  if (debug_print) {
-	    debug_print(889, ts2.tv_sec, ts2.tv_nsec);
-	  }
-	  */
 	  double diff_nsec = (ts2.tv_sec - ts->tv_sec) * 1e9 + (ts2.tv_nsec - ts->tv_nsec);
 	  if (diff_nsec > 0)
 	    return 0;
@@ -267,28 +240,11 @@ long hook_function(long a1, long a2, long a3,
       }
     } else if (a1 == 257) { // openat
       char *filename = (char*)a3;
-      /*
-      int i;
-      for (i=0; i<4; i++) {
-	char *filename = (char*)a3;
-	printf("%c", filename[i]);
-      }
-      printf("\n");
-      */
-      //printf("%s \n", filename);
       if (openat_file((char*)a3)) {
 	ret = next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-	printf("openat with mylib: fd=%d\n", ret);
-	
-	int i;
-	/*
-	for (i=0; i<16; i++) {
-	  printf("%c", filename[i]);
-	}
-	*/
-	printf("%s \n", filename);
+	printf("openat with mylib: fd=%d %s\n", ret, filename);
 	if (ret < MAX_HOOKFD) {
-	  hookfds[ret] = myfs_open((char *)a3);
+	  hookfds[ret] = myfs_open((char *)filename);
 	  cur_pos[ret] = 0;
 	  //hookfds[ret] = 1;
 	}
@@ -333,31 +289,6 @@ long hook_function(long a1, long a2, long a3,
 	ABT_thread_yield();
       }
     } else if (a1 == 0) { // read
-#if 0
-      if (hookfds[a2] >= 0) {
-	int rank;
-	ABT_xstream_self_rank(&rank);
-	int qid = rank + 1;
-	if (debug_print)
-	  debug_print(883, rank, 0);
-	size_t count = a4;
-	
-	int j;
-	for (j=0; j<count; j+=512) {
-	  int64_t lba = myfs_get_lba(hookfds[a2], cur_pos[a2] + j, 0);
-	  int rid = nvme_read_req(lba, 1, qid, MIN(512, count - j), a3 + 512);
-	  while (1) {
-	    if (nvme_check(rid))
-	      break;
-	    ABT_thread_yield();
-	  }
-	}
-	cur_pos[a2] += count;
-	return count;
-      } else {
-	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-      }
-#else
       int hookfd = hookfds[a2];
       char *buf = (char *)a3;
       loff_t len = a4;
@@ -369,50 +300,7 @@ long hook_function(long a1, long a2, long a3,
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
-#endif
     } else if (a1 == 17) { // pread64
-#if 0
-      if (hookfds[a2] >= 0) {
-	int rank;
-	ABT_xstream_self_rank(&rank);
-	int qid = rank + 1;
-	size_t count = a4;
-	loff_t pos = a5;
-	//printf("pread64 buf %lx\n", a3);
-	if (debug_print)
-	  debug_print(883, a2, pos);
-	int j;
-	int blksz = BLKSZ;
-	int64_t lba = myfs_get_lba(hookfds[a2], pos, 0);
-	if (count < 4096) {
-	  if ((lba % 8) * 512 + count > 4096) {
-	    blksz = 512;
-	  }
-	} else {
-	  if ((count % blksz != 0) || (lba % (blksz / 512) != 0)) {
-	    blksz = 512;
-	  }
-	}
-	//printf("pread64 fd=%d, sz=%ld, pos=%ld hookfsd[a2]=%d lba=%d (%d) blksz=%d\n", a2, count, pos, hookfds[a2], lba, lba % (blksz / 512), blksz);
-	for (j=0; j<count; j+=blksz) {
-	  lba = myfs_get_lba(hookfds[a2], pos + j, 0);
-	  //printf("pread64 fd=%d, sz=%ld, pos=%ld lba=%lu\n", a2, count, pos, lba);
-	  int rid = nvme_read_req(lba, blksz/512, qid, MIN(blksz, count - j), a3 + j);
-	  while (1) {
-	    if (debug_print)
-	      debug_print(876, 0, 0);
-	    if (nvme_check(lba, qid, rid))
-		break;
-	    ABT_thread_yield();
-	  }
-	}
-	return count;
-      } else {
-	if (debug_print)
-	  debug_print(874, a1, a2);
-	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-      }
-#else
       int hookfd = hookfds[a2];
       char *buf = (char *)a3;
       loff_t len = a4;
@@ -424,28 +312,7 @@ long hook_function(long a1, long a2, long a3,
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
-#endif
     } else if (a1 == 1) { // write
-#if 0
-      if (hookfds[a2] >= 0) {
-	int qid = get_qid();
-	size_t count = a4;
-	int j;
-	for (j=0; j<count; j+=512) {
-	  uint32_t lba = myfs_get_lba(hookfds[a2], cur_pos[a2]+j, 1);
-	  int cid = nvme_write_req(lba, 1, qid, MIN(512, count - j), a3 + j);
-	  while (1) {
-	    if (nvme_write_check(lba, qid, cid))
-	      break;
-	    ABT_thread_yield();
-	  }
-	}
-	cur_pos[a2] += count;
-	return count;
-      } else {
-	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-      }
-#else
       int hookfd = hookfds[a2];
       char *buf = (char *)a3;
       loff_t len = a4;
@@ -456,34 +323,9 @@ long hook_function(long a1, long a2, long a3,
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
-#endif
     } else if (a1 == 186) { // gettid
       return abt_id;
     } else if (a1 == 18) { // pwrite64
-#if 0
-      if (hookfds[a2] >= 0) {
-	int qid = get_qid();
-	size_t count = a4;
-	loff_t pos = a5;
-	int fd = a2;
-	int j;
-	//printf("pwrite64 fd=%d, sz=%ld, pos=%ld\n", a2, count, pos);
-	if (debug_print4)
-	  debug_print4(7, a2, a3, a4, a5);
-	for (j=0; j<count; j+=512) {
-	  int lba = myfs_get_lba(hookfds[fd], pos + j, 1);
-	  int cid = nvme_write_req(lba, 1, qid, MIN(512, count - j), a3 + j);
-	  while (1) {
-	    if (nvme_write_check(lba, qid, cid))
-	      break;
-	    ABT_thread_yield();
-	  }
-	}
-	return count;
-      } else {
-	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-      }
-#else
       int hookfd = hookfds[a2];
       char *buf = (char *)a3;
       loff_t len = a4;
@@ -496,7 +338,6 @@ long hook_function(long a1, long a2, long a3,
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
-#endif
     } else if (a1 == 262) { // fstat
       if (((int32_t)a2 >= 0) && (hookfds[a2] >= 0)) {
 	uint64_t sz = myfs_get_size(hookfds[a2]);
@@ -624,64 +465,17 @@ long hook_function(long a1, long a2, long a3,
     } else if (a1 == 207) { // io_destroy
       printf("io_destroy %ld %p\n", a2, (void *)a3);
       return 0;
-    } else if (a1 == 285) { // fallocate
-      int fd = a2;
-      int mode = a3;
-      loff_t pos = a4;
-      loff_t len = a5;
-      printf("fallocate fd=%d mode=%d offset=%ld len=%ld\n", fd, mode, pos, len);
-#if 0
-      if (hookfds[fd] >= 0) {
-	myfs_allocate(hookfds[fd], mode, pos, len);
-      }
-      return 0;
-#else
-      return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-#endif
-    } else if ((a1 == 1) || // write
-	(a1 == 9) || // mmap
-	(a1 == 12) || // brk
-	(a1 == 202) || // futex
-	       true ||
-	false) {
-      //ABT_thread_yield();
+    } else if (1) {
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     } else {
-      /*
-      if (debug_print) {
-	debug_print(1, a1, abt_id);
-      }
-      */
       req_helper(abt_id, a1, a2, a3, a4, a5, a6, a7);
       while (1) {
 	if (helpers[abt_id].done)
 	  break;
-	/*
-	if (debug_print) {
-	  if (abt_id % 4 == 1)
-	    debug_print(77, a1, abt_id);
-	}
-	*/
 	ABT_thread_yield();
 	//uint64_t pre_id;
 	//int ret = ABT_self_get_pre_id(&pre_id);
-	/*
-	{
-	  if (debug_print) {
-	    if (abt_id % 4 == 1) {
-	      debug_print(7, a1, abt_id);
-	      //debug_print(7, a1, pre_id);
-	    }
-	  }
-	}
-	*/
       }
-      /*
-      if (debug_print) {
-	debug_print(2, a1, helpers[abt_id].ret);
-	//debug_print(2, a1, abt_id);
-      }
-      */
       return helpers[abt_id].ret;
     }
   } else {
