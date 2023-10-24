@@ -1,3 +1,8 @@
+#define _GNU_SOURCE
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
@@ -8,6 +13,7 @@
 #include <assert.h>
 #include <time.h>
 #include <linux/aio_abi.h>
+#include <sys/syscall.h>
 
 #include "real_pthread.h"
 #include "nvme.h"
@@ -71,7 +77,7 @@ void do_helper(void *arg) {
 //#define FOR_FIO (1)
 #define FOR_WT (1)
 
-int openat_file(char *filename)
+int is_hooked_filename(const char *filename)
 {
   int ret = 0;
 #if FOR_FIO
@@ -98,7 +104,7 @@ int openat_file(char *filename)
 #endif
   
 #if FOR_WT
-#define MYFILE ("/home/tomoya-s/mountpoint/tomoya-s/wt_abtOK250m/test.wt")
+#define MYFILE ("/home/tomoya-s/mountpoint2/tomoya-s/wt_abt250k/test.wt")
   ret |= (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
 #endif
   return ret;
@@ -111,7 +117,6 @@ static int cur_aio_rp;
 static int cur_aio_max;
 
 #define MAX_HOOKFD (1024)
-//int hookfd = -1;
 int hookfds[MAX_HOOKFD];
 size_t cur_pos[MAX_HOOKFD];
 
@@ -165,6 +170,53 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
   }
 }
 
+static inline int
+hook_openat(long a1, long a2, long a3,
+	    long a4, long a5, long a6,
+	    long a7)
+{
+  int dfd = a2; // dir. fd is not used.
+  const char *filename = (const char *)a3;
+  int flags = a4;
+  mode_t mode = a5;
+
+  int ret = next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+  if (flags & O_DIRECT) {
+    if (is_hooked_filename(filename)) {
+      printf("hooked file: fd=%d dfd=%d filename=%s flags=%o mode=%o\n", ret, dfd, filename, flags, mode);
+      if (ret < MAX_HOOKFD) {
+	hookfds[ret] = myfs_open(filename);
+	cur_pos[ret] = 0;
+      } else {
+	printf("error: reached upper limit of opened files.\n");
+	assert(0);
+      }
+    }
+  }
+  return ret;
+}
+
+static inline int
+hook_clock_nanosleep(clockid_t which_clock, int flags,
+		     const struct timespec *req,
+		     struct timespec *rem)
+{
+  printf("%s clock=%d flags=%d\n", __func__, which_clock, flags);
+  assert(flags == 0); // implemented relative time only.
+  struct timespec alarm;
+  clock_gettime(CLOCK_MONOTONIC_COARSE, &alarm);
+  alarm.tv_sec += req->tv_sec;
+  alarm.tv_nsec += req->tv_nsec;
+  while (1) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC_COARSE, &now);
+    double diff_nsec = (now.tv_sec - alarm.tv_sec) * 1e9 + (now.tv_nsec - alarm.tv_nsec);
+    if (diff_nsec > 0)
+      return 0;
+    ABT_thread_yield();
+  }
+  return 0;
+}
 
 
 long hook_function(long a1, long a2, long a3,
@@ -191,27 +243,9 @@ long hook_function(long a1, long a2, long a3,
     if (debug_print) {
       debug_print(1, a1, abt_id);
     }
-    if (a1 == 230) { // sleep
-      if (debug_print)
-	debug_print(666, a2, a3);
-      if (a3 == 0) {
-	struct timespec *ts = (struct timespec *) a4;
-	struct timespec tsc;
-	clock_gettime(CLOCK_MONOTONIC_COARSE, &tsc);
-	ts->tv_sec += tsc.tv_sec;
-	ts->tv_nsec += tsc.tv_nsec;
-	while (1) {
-	  struct timespec ts2;
-	  clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
-	  double diff_nsec = (ts2.tv_sec - ts->tv_sec) * 1e9 + (ts2.tv_nsec - ts->tv_nsec);
-	  //printf("diff_nsec %f\n", diff_nsec);
-	  if (diff_nsec > 0)
-	    return 0;
-	  ABT_thread_yield();
-	}
-      }
-    }
-    else if (a1 == 441) {
+    if (a1 == SYS_nanosleep) {
+      return hook_clock_nanosleep(a2, a3, (struct timespec *)a4, (struct timespec *)a5);
+    } else if (a1 == 441) { // epoll_pwait2
       struct timespec tsz = {.tv_sec = 0, .tv_nsec = 0};
       struct timespec *ts = (struct timespec *) a5;
       if (ts) {
@@ -234,21 +268,8 @@ long hook_function(long a1, long a2, long a3,
 	}
 	ABT_thread_yield();
       }
-    } else if (a1 == 257) { // openat
-      char *filename = (char*)a3;
-      if (openat_file((char*)a3)) {
-	ret = next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-	printf("openat with mylib: fd=%d %s\n", ret, filename);
-	if (ret < MAX_HOOKFD) {
-	  hookfds[ret] = myfs_open((char *)filename);
-	  cur_pos[ret] = 0;
-	  //hookfds[ret] = 1;
-	}
-	if (debug_print)
-	  debug_print(884, ret, 0);
-	return ret;
-      }
-      return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+    } else if (a1 == SYS_openat) { // openat
+      return hook_openat(a1, a2, a3, a4, a5, a6, a7);
     } else if (a1 == 3) { // close
       if (hookfds[a2] >= 0) {
 	printf("close for mylib: fd=%ld\n", a2);
@@ -507,8 +528,8 @@ int __hook_init(long placeholder __attribute__((unused)),
   next_sys_call = *((syscall_fn_t *) sys_call_hook_ptr);
   *((syscall_fn_t *) sys_call_hook_ptr) = hook_function;
 
-  nvme_init(0, 16);
-  nvme_init(1, 18);
+  nvme_init(0, 20);
+  //nvme_init(1, 19);
   /*
   nvme_init(2, 18);
   nvme_init(3, 20);

@@ -23,8 +23,8 @@ static inline int get_tid()
 
 #define INACTIVE_BLOCK (-1)
 
-void disable_preempt_ult();
-void enable_preempt_ult();
+#define disable_preempt_ult()
+#define enable_preempt_ult()
 
 
 #endif 

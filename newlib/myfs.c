@@ -87,7 +87,7 @@ myfs_mount(char *myfs_superblock)
 }
 
 int
-myfs_open(char *filename)
+myfs_open(const char *filename)
 {
   int i;
   int empty_i = -1;
