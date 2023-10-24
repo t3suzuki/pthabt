@@ -100,26 +100,6 @@ myfs_mount(char *myfs_superblock)
   printf("%s %d  wp=%ld\n", __func__, __LINE__, superblock->block_wp);
 }
 
-void
-myfs_allocate(int i, int mode, long pos, long len)
-{
-  int i_block = pos / MYFS_BLOCK_SIZE;
-  while (1) {
-    if ((uint64_t)i_block * MYFS_BLOCK_SIZE > (pos + len)) {
-      break;
-    }
-    if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
-      superblock->file[i].block[i_block] = JUST_ALLOCATED;
-    }
-    i_block++;
-  }
-  if ((mode & FALLOC_FL_KEEP_SIZE) == 0) {
-    if (i_block+1 > superblock->file[i].tail_block) {
-      superblock->file[i].tail_block = i_block+1;
-    }
-  }
-}
-
 int
 myfs_open(char *filename)
 {
@@ -142,26 +122,6 @@ myfs_open(char *filename)
   return empty_i;
 }
 
-int
-myfs_get_lba_old(int i, uint64_t offset, int write) {
-  uint64_t i_block = offset / MYFS_BLOCK_SIZE;
-  if (superblock->file[i].block[i_block] == JUST_ALLOCATED) {
-    return JUST_ALLOCATED;
-  }
-  if (write > 0) {
-    if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
-      superblock->file[i].block[i_block] = superblock->block_wp++;
-      
-      if (i_block+1 > superblock->file[i].tail_block) {
-	superblock->file[i].tail_block = i_block+1;
-	//printf("file %d update tail_block %ld\n", i, i_block);
-      }
-    }
-  }
-  //printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
-  int lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (offset % MYFS_BLOCK_SIZE)) / 512;
-  return lba;
-}
 
 char zbuf[BLKSZ];
 
@@ -170,21 +130,7 @@ myfs_get_lba(int i, uint64_t offset, int write) {
   int i_block = offset / MYFS_BLOCK_SIZE;
   //printf("%s %d offset=%ld write=%d block=%d tail=%d\n", __func__, i, offset, write, superblock->file[i].block[i_block], superblock->file[i].tail_block);
   if (write > 0) {
-    if (superblock->file[i].block[i_block] == JUST_ALLOCATED) {
-      if (write) {
-	superblock->file[i].block[i_block] = superblock->block_wp++;
-	int tid = get_tid();
-	for (int j=0; j<MYFS_BLOCK_SIZE; j+=BLKSZ) {
-	  int64_t lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (j % MYFS_BLOCK_SIZE)) / 512;
-	  int rid = nvme_write_req(lba, BLKSZ/512, tid, BLKSZ, zbuf);
-	  while (1) {
-	    if (nvme_check(rid))
-	      break;
-	    ABT_thread_yield();
-	  }
-	}
-      }
-    }
+    
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
       superblock->file[i].block[i_block] = superblock->block_wp++;
 
@@ -192,13 +138,8 @@ myfs_get_lba(int i, uint64_t offset, int write) {
 	superblock->file[i].tail_block = i_block+1;
 	//printf("file %d update tail_block %ld\n", i, i_block+1);
       }
-
-      //printf("assign new block %d\n", superblock->file[i].block[i_block]);
     }
-  } else {
-    if (superblock->file[i].block[i_block] == JUST_ALLOCATED) {
-      return JUST_ALLOCATED;
-    }
+    
   }
   //printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
   int64_t lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (offset % MYFS_BLOCK_SIZE)) / 512;
