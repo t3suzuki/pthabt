@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <errno.h>
+#include <assert.h>
 #include "nvme.h"
 #include "common.h"
 
@@ -23,6 +24,7 @@ typedef struct {
   int32_t block[MYFS_MAX_BLOCKS_PER_FILE];
   uint64_t total_size;
   uint64_t tail_block;
+  ABT_mutex abt_mutex;
 } file_t;
 
 typedef struct {
@@ -52,26 +54,10 @@ myfs_init()
   superblock->block_wp = 0;
 }
 
-void
-myfs_set_size(int i, uint64_t sz) {
-  superblock->file[i].total_size = sz;
-}
-
 uint64_t
 myfs_get_size(int i) {
   printf("file %d get tail_block %ld\n", i, superblock->file[i].tail_block);
   return superblock->file[i].tail_block * MYFS_BLOCK_SIZE;
-}
-
-int
-myfs_get_size2(char *filename) {
-  int i;
-  for (i=0; i<MYFS_MAX_FILES; i++) {
-    if (strncmp(filename, superblock->file[i].name, strlen(filename)) == 0) {
-      return superblock->file[i].total_size;
-    }
-  }
-  return -1;
 }
 
 void
@@ -123,14 +109,12 @@ myfs_open(char *filename)
 }
 
 
-char zbuf[BLKSZ];
-
 int64_t
 myfs_get_lba(int i, uint64_t offset, int write) {
   int i_block = offset / MYFS_BLOCK_SIZE;
   //printf("%s %d offset=%ld write=%d block=%d tail=%d\n", __func__, i, offset, write, superblock->file[i].block[i_block], superblock->file[i].tail_block);
   if (write > 0) {
-    
+    ABT_mutex_lock(superblock->file[i].abt_mutex);
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
       superblock->file[i].block[i_block] = superblock->block_wp++;
 
@@ -139,9 +123,10 @@ myfs_get_lba(int i, uint64_t offset, int write) {
 	//printf("file %d update tail_block %ld\n", i, i_block+1);
       }
     }
-    
+    ABT_mutex_unlock(superblock->file[i].abt_mutex);
   }
   //printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
+  assert(superblock->file[i].block[i_block] != INACTIVE_BLOCK);
   int64_t lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (offset % MYFS_BLOCK_SIZE)) / 512;
   return lba;
 }
@@ -154,17 +139,3 @@ myfs_umount()
 }
 
 
-#if 0
-int main()
-{
-  //myfs_init();
-  myfs_mount("myfs_superblock");
-  int find0 = myfs_open("file0");
-  int find1 = myfs_open("file2");
-  printf("%d\n", myfs_get_lba(find1, 0, 1));
-  printf("%d\n", myfs_get_lba(find0, 0, 1));
-  printf("%d\n", myfs_get_lba(find0, 1024, 1));
-  myfs_umount();
-  //myfs_deinit();
-}
-#endif

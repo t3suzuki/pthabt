@@ -252,7 +252,6 @@ long hook_function(long a1, long a2, long a3,
     } else if (a1 == 3) { // close
       if (hookfds[a2] >= 0) {
 	printf("close for mylib: fd=%ld\n", a2);
-	//myfs_set_size(hookfds[a2], cur_pos[a2]);
 	hookfds[a2] = -1;
       }
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
