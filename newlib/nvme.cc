@@ -100,7 +100,7 @@ typedef struct {
   } SF;
 } cqe_t;
 
-char *malloc_2MB()
+static char *malloc_2MB()
 {
   const int sz = 2*1024*1024;
   char *buf = (char *)mmap(NULL, sz, PROT_READ | PROT_WRITE,
@@ -305,10 +305,10 @@ public:
 };
 
 
-QP *qps[ND][NQ+1]; // +1 is for admin queue.
+static QP *qps[ND][NQ+1]; // +1 is for admin queue.
 
 
-void
+static void
 create_qp(int did, int new_qid)
 {
   // CQ create
@@ -429,7 +429,9 @@ nvme_read_req(int64_t lba, int num_blk, int tid, int len, char *buf)
   int qid = tid + 1;
   int did = (lba / RAID_FACTOR) % ND;
 
-  QP *qp = qps[did][qid];  
+  QP *qp = qps[did][qid];
+
+  disable_preempt_ult();
   sqe_t *sqe = qp->new_sqe(&cid);
   //qps[qid]->get_buf4k(cid)[0] = 0xff;
   //bzero(sqe, sizeof(sqe_t));
@@ -461,34 +463,12 @@ nvme_read_req(int64_t lba, int num_blk, int tid, int len, char *buf)
   qp->lba[cid] = lba;
   #endif
   qp->sq_doorbell();
+  enable_preempt_ult();
+  
   int rid = did*QD*NQ + tid*QD + cid;
   //printf("%s rid = %d lba = %d did=%d,tid=%d,cid=%d,buf=%p,len=%d\n", __func__, rid, lba, did, tid, cid, buf, len);
   return rid;
 }
-
-#if 0
-int
-nvme_read_check(int lba, int qid, int cid)
-{
-  int did = (lba / RAID_FACTOR) % ND;
-  QP *qp = qps[did][qid];
-  unsigned char c = qp->get_buf4k(cid)[0];
-  qp->check_cq();
-  if (qp->done(cid)) {
-    //printf("read_cmp qid = %d cid = %d buf[0]=%d %d %p buf4k[0]=%d->%d\n", qid, cid, ((unsigned char*)buf)[0], len, qps[qid]->get_buf4k(cid), c, (unsigned char)(qps[qid]->get_buf4k(cid)[0]));
-    //printf("read_cmp qid = %d cid = %d %d\n", qid, cid, len);    
-    /*
-    if (debug_print) {
-      debug_print(521, cid, -1);
-      debug_print(522, ((unsigned int*)buf)[0], ((unsigned int*)(qps[qid]->get_buf4k(cid)))[0]);
-    }
-    */
-    increment_read_count(qid);
-    return 1;
-  }
-  return 0;
-}
-#endif
 
 int
 nvme_check(int rid)
@@ -499,7 +479,9 @@ nvme_check(int rid)
   //printf("%s %d rid=%d did=%d qid=%d\n", __func__, __LINE__, rid, did, qid);
   QP *qp = qps[did][qid];
   unsigned char c = qp->get_buf4k(cid)[0];
+  disable_preempt_ult();
   qp->check_cq();
+  enable_preempt_ult();
   if (qp->done(cid)) {
     return 1;
   }
@@ -513,6 +495,9 @@ nvme_write_req(int64_t lba, int num_blk, int tid, int len, char *buf)
   int cid;
   int did = (lba / RAID_FACTOR) % ND;
   QP *qp = qps[did][qid];
+
+
+  disable_preempt_ult();
   sqe_t *sqe = qp->new_sqe(&cid);
   memcpy(qp->get_buf4k(cid), buf, len);
   sqe->PRP1 = qp->buf4k_pa(cid);
@@ -523,6 +508,8 @@ nvme_write_req(int64_t lba, int num_blk, int tid, int len, char *buf)
   qp->rbuf[cid] = NULL;
   qp->len[cid] = 0;
   qp->sq_doorbell();
+  enable_preempt_ult();
+  
   int rid = did*QD*NQ + tid*QD + cid;
 
   /*
@@ -537,85 +524,4 @@ nvme_write_req(int64_t lba, int num_blk, int tid, int len, char *buf)
   return rid;
 }
 
-#if 0
-int
-nvme_write_check(int lba, int qid, int cid)
-{
-  int did = (lba / RAID_FACTOR) % ND;
-  QP *qp = qps[did][qid];
-  qp->check_cq();
-  if (qp->done(cid)) {
-    //printf("write ok %d\n", cid);
-    return 1;
-  }
-  return 0;
-}
-#endif
-
-  
-#if 0
-char wbuf[4096];
-char rbuf[4096];
-int
-main()
-{
-  nvme_init();
-
-  int qid = 1;
-  int lba = 0;
-  int cid;
-  int len = 512;
-  int i;
-  int j;
-  int cids[16];
-
-  //nvme_write2(lba, 1);
-  for (j=0; j<16; j++) {
-    for (i=0; i<512; i++) {
-      wbuf[i] = 0x5a + j;
-    }
-    cid = nvme_write_req(lba, 1, qid, len, wbuf);
-    while (1) {
-      if (nvme_write_check(qid, cid))
-	break;
-    }
-    
-    cid = nvme_read_req(lba, 1, qid, len, rbuf);
-    while (1) {
-      if (nvme_read_check(qid, cid))
-	break;
-    }
-    printf("%x\n", rbuf[0]);
-  }
-
-  for (j=0; j<16; j++) {
-    wbuf[0] = 0x5 + j;
-    lba = j;
-    cids[j] = nvme_write_req(lba, 1, qid, len, wbuf);
-  }
-  for (j=0; j<16; j++) {
-    while (1) {
-      if (nvme_write_check(qid, cids[j]))
-	break;
-    }
-  }
-
-  for (j=0; j<16; j++) {
-    lba = j;
-    cids[j] = nvme_read_req(lba, 1, qid, len, rbuf);
-  }
-  for (j=0; j<16; j++) {
-    while (1) {
-      if (nvme_read_check(qid, cids[j]))
-	break;
-    }
-    printf("%x\n", rbuf[0]);
-  }
-
-  //nvme_write(0, 1);
-  //nvme_read(0, 1);
-  return 0;
-}
-#endif
-
-}
+} // extern "C"

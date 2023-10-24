@@ -24,6 +24,8 @@ static inline int get_tid()
 #define INACTIVE_BLOCK (-1)
 #define JUST_ALLOCATED (-2)
 
+void disable_preempt_ult();
+void enable_preempt_ult();
 
 
 #endif 
