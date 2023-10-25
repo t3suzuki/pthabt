@@ -85,7 +85,7 @@ static void init_hooked_filename() {
   }  
 }
 
-int is_hooked_filename(const char *filename)
+static int is_hooked_filename(const char *filename)
 {
   int ret = 0;
   if (hooked_filename) {
