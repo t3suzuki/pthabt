@@ -77,8 +77,23 @@ void do_helper(void *arg) {
 //#define FOR_FIO (1)
 #define FOR_WT (1)
 
+static char *hooked_filename;
+static char *hooked_rocksdb_dir;
+static void init_hooked_filename() {
+  hooked_filename = getenv("HOOKED_FILENAME");
+  if (hooked_filename) {
+    printf("hooked_filename : %s\n", hooked_filename);
+  }
+  hooked_rocksdb_dir = getenv("HOOKED_ROCKSDB_DIR");
+  if (hooked_rocksdb_dir) {
+    printf("hooked_rocksdb_dir : %s\n", hooked_rocksdb_dir);
+  }  
+}
+
 int is_hooked_filename(const char *filename)
 {
+
+#if 0
   int ret = 0;
 #if FOR_FIO
 #define MYFILE ("myfile")
@@ -106,6 +121,19 @@ int is_hooked_filename(const char *filename)
 #if FOR_WT
 #define MYFILE ("/home/tomoya-s/mountpoint2/tomoya-s/wt_abt250k/test.wt")
   ret |= (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
+#endif
+
+#else
+  int ret = 0;
+  if (hooked_filename) {
+    ret |= (strncmp(hooked_filename, filename, strlen(hooked_filename)) == 0);
+  }
+  if (hooked_rocksdb_dir) {
+    const char sst_suffix[] = ".sst";
+    const int sst_filename_len = 6;
+    ret |= ((strncmp(hooked_rocksdb_dir, filename, strlen(hooked_rocksdb_dir)) == 0) &&
+	    (strncmp(sst_suffix, filename + strlen(hooked_rocksdb_dir) + sst_filename_len, strlen(sst_suffix)) == 0));
+  }
 #endif
   return ret;
 }
@@ -500,18 +528,14 @@ int __hook_init(long placeholder __attribute__((unused)),
 		void *sys_call_hook_ptr)
 {
 
-#ifdef MYFILE
-  printf("hooked file name : %s\n", MYFILE);
-#endif
-#ifdef MYDIR
-  printf("hooked rocksdb name : %s\n", MYDIR);
-#endif
-  myfs_mount("/root/myfs_superblock2");
+  char *myfs_superblock_path = getenv("MYFS_SUPERBLOCK_PATH");
+  assert(myfs_superblock_path);
+  myfs_mount(myfs_superblock_path);
 
+  init_hooked_filename();
   int i;
   for (i=0; i<MAX_HOOKFD; i++) {
     hookfds[i] = -1;
-    //cur_pos[i] = 0;
   }
   
   load_debug();
