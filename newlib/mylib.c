@@ -10,6 +10,7 @@ static ABT_xstream abt_xstreams[N_TH];
 static ABT_thread abt_threads[ULT_N_TH];
 static ABT_pool global_abt_pools[N_TH];
 static unsigned int global_my_tid = 0;
+static ABT_preemption_group abt_preemption_group;
 
 //#define __PTHREAD_VERBOSE__ (1)
 
@@ -257,7 +258,7 @@ int pthread_setspecific(pthread_key_t key, const void *value) {
 #if __PTHREAD_VERBOSE__
   printf("%s %d key=%d\n", __func__, __LINE__, key);
 #endif
-  return ABT_self_set_specific(*(abt_keys[key]), (void *)value);
+  return ABT_key_set(*(abt_keys[key]), (void *)value);
 }
 
 void * pthread_getspecific(pthread_key_t key) {
@@ -265,7 +266,7 @@ void * pthread_getspecific(pthread_key_t key) {
   printf("%s %d key=%d\n", __func__, __LINE__, key);
 #endif
   void *ret;
-  ABT_self_get_specific(*(abt_keys[key]), &ret);
+  ABT_key_get(*(abt_keys[key]), &ret);
   return ret;
 }
 
@@ -347,7 +348,7 @@ int sched_yield() {
     int pool_id;
     uint64_t abt_id;
     ABT_self_get_last_pool_id(&pool_id);
-    ABT_self_get_thread_id(&abt_id);
+    ABT_thread_self_id(&abt_id);
     printf("%lu pool_id %d\n", abt_id, pool_id);
   }
   return ABT_thread_yield();
@@ -357,12 +358,13 @@ int sched_yield() {
 
 void __zpoline_init(void);
 
-__attribute__((constructor(0xffff))) static void
-mylib_init()
+void
+abt_init()
 {
   int i;
-  printf(".so argobots!\n");
   ABT_init(0, NULL);
+#if 0
+  printf(".so argobots!\n");
   ABT_xstream_self(&abt_xstreams[0]);
   for (i=1; i<N_TH; i++) {
     ABT_xstream_create(ABT_SCHED_NULL, &abt_xstreams[i]);
@@ -371,12 +373,39 @@ mylib_init()
     ABT_xstream_set_cpubind(abt_xstreams[i], i);
     ABT_xstream_get_main_pools(abt_xstreams[i], 1, &global_abt_pools[i]);
   }
+#else
+  printf(".so argobots with preempt!\n");
+  for (i=0; i<N_TH; i++) {
+    ABT_pool_create_basic(ABT_POOL_FIFO, ABT_POOL_ACCESS_MPMC, ABT_TRUE, &global_abt_pools[i]);
+  }
 
+  ABT_xstream_self(&abt_xstreams[0]);
+  ABT_sched sched;
+  ABT_sched_create_basic(ABT_SCHED_BASIC, 1, &global_abt_pools[0], ABT_SCHED_CONFIG_NULL, &sched);
+  ABT_xstream_set_main_sched(abt_xstreams[0], sched);
+
+  for (i=1; i<N_TH; i++) {
+    ABT_xstream_create_basic(ABT_SCHED_BASIC, 1, &global_abt_pools[i], ABT_SCHED_CONFIG_NULL, &abt_xstreams[i]);
+    ABT_xstream_start(abt_xstreams[i]);
+  }
+  for (i=0; i<N_TH; i++) {
+    ABT_xstream_set_cpubind(abt_xstreams[i], i);
+  }
+
+  ABT_preemption_timer_create_groups(1, &abt_preemption_group);
+  ABT_preemption_timer_set_xstreams(abt_preemption_group, N_TH, abt_xstreams);
+  ABT_preemption_timer_start(abt_preemption_group);
+#endif
   ABT_mutex_create(&abt_key_mutex);
-  fflush(0);
-  //sleep(1);
-  
+}
+
+
+__attribute__((constructor(0xffff))) static void
+mylib_init()
+{
   __zpoline_init();
+
+  abt_init();
 }
 
 

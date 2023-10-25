@@ -221,7 +221,7 @@ long hook_function(long a1, long a2, long a3,
   */
 
   uint64_t abt_id;
-  int ret = ABT_self_get_thread_id(&abt_id);
+  int ret = ABT_thread_self_id(&abt_id);
   if (ret == ABT_SUCCESS && (abt_id >= 0)) {
 
     /*

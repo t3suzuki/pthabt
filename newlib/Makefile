@@ -7,7 +7,8 @@ FLAGS += -fpic
 FLAGS += -DN_TH=$(N_TH) -DND=$(ND)
 #FLAGS += -DDEBUG=1
 
-ABT_PATH ?= $(HOME)/argobots/install
+#ABT_PATH ?= $(HOME)/argobots/install
+ABT_PATH ?= $(HOME)/work/github/ppopp21-preemption-artifact/argobots/install
 
 all:
 	g++ $(FLAGS) -c nvme.cc  -fno-exceptions -I $(ABT_PATH)/include
