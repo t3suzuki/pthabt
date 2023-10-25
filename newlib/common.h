@@ -22,6 +22,7 @@ static inline int get_tid()
 }
 
 #define INACTIVE_BLOCK (-1)
+#define NOT_USED_FD (-1)
 
 #define disable_preempt_ult()
 #define enable_preempt_ult()

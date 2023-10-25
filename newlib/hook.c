@@ -189,16 +189,17 @@ hook_clock_nanosleep(clockid_t which_clock, int flags,
 		     const struct timespec *req,
 		     struct timespec *rem)
 {
-  assert(which_clock == 0);
-  //printf("%s clock=%d flags=%d\n", __func__, which_clock, flags);
+  assert(which_clock == CLOCK_REALTIME);
   assert(flags == 0); // implemented relative time only.
+  //printf("%s clock=%d flags=%d\n", __func__, which_clock, flags);
+  
   struct timespec alarm;
-  clock_gettime(CLOCK_MONOTONIC_COARSE, &alarm);
+  clock_gettime(CLOCK_REALTIME_COARSE, &alarm);
   alarm.tv_sec += req->tv_sec;
   alarm.tv_nsec += req->tv_nsec;
   while (1) {
     struct timespec now;
-    clock_gettime(CLOCK_MONOTONIC_COARSE, &now);
+    clock_gettime(CLOCK_REALTIME_COARSE, &now);
     double diff_nsec = (now.tv_sec - alarm.tv_sec) * 1e9 + (now.tv_nsec - alarm.tv_nsec);
     if (diff_nsec > 0)
       return 0;
@@ -228,122 +229,134 @@ long hook_function(long a1, long a2, long a3,
       printf("call %ld %ld\n", a1, abt_id);
     }
     */
-
+    /*
     if (debug_print) {
       debug_print(1, a1, abt_id);
     }
-    if (a1 == 230) { // nanosleep
+    */
+    switch (a1) {
+    case 230: // nanosleep
       return hook_clock_nanosleep(a2, a3, (struct timespec *)a4, (struct timespec *)a5);
-    } else if (a1 == 441) { // epoll_pwait2
-      struct timespec tsz = {.tv_sec = 0, .tv_nsec = 0};
-      struct timespec *ts = (struct timespec *) a5;
-      if (ts) {
-	struct timespec tsc;
-	clock_gettime(CLOCK_MONOTONIC_COARSE, &tsc);
-	ts->tv_sec += tsc.tv_sec;
-	ts->tv_nsec += tsc.tv_nsec;
-      }
-      while (1) {
-	int ret = next_sys_call(a1, a2, a3, a4, (long)&tsz, a6, a7);
-	if (ret > 0) {
-	  return ret;
-	}
+    case 441: // epoll_pwait2
+      {
+	struct timespec tsz = {.tv_sec = 0, .tv_nsec = 0};
+	struct timespec *ts = (struct timespec *) a5;
 	if (ts) {
-	  struct timespec ts2;
-	  clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
-	  double diff_nsec = (ts2.tv_sec - ts->tv_sec) * 1e9 + (ts2.tv_nsec - ts->tv_nsec);
-	  if (diff_nsec > 0)
-	    return 0;
+	  struct timespec tsc;
+	  clock_gettime(CLOCK_MONOTONIC_COARSE, &tsc);
+	  ts->tv_sec += tsc.tv_sec;
+	  ts->tv_nsec += tsc.tv_nsec;
 	}
-	ABT_thread_yield();
+	while (1) {
+	  int ret = next_sys_call(a1, a2, a3, a4, (long)&tsz, a6, a7);
+	  if (ret > 0) {
+	    return ret;
+	  }
+	  if (ts) {
+	    struct timespec ts2;
+	    clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
+	    double diff_nsec = (ts2.tv_sec - ts->tv_sec) * 1e9 + (ts2.tv_nsec - ts->tv_nsec);
+	    if (diff_nsec > 0)
+	      return 0;
+	  }
+	  ABT_thread_yield();
+	}
       }
-    } else if (a1 == SYS_openat) { // openat
+    case SYS_openat:
       return hook_openat(a1, a2, a3, a4, a5, a6, a7);
-    } else if (a1 == 3) { // close
-      if (hookfds[a2] >= 0) {
-	printf("close for mylib: fd=%ld\n", a2);
-	hookfds[a2] = -1;
-      }
-      return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-    } else if (a1 == 270) { //select
-      //printf("%ld %lx %lx %lx %lx\n", a2, a3, a4, a5, a6);
-      struct timespec *ats = (struct timespec *) a6;
-      //printf("%ld %ld\n", ats->tv_sec, ats->tv_nsec);
-      if (debug_print)
-	debug_print(870, ats->tv_sec, ats->tv_nsec);
-      struct timespec ts;
-      clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
-      if (debug_print)
-	debug_print(870, ts.tv_sec, ts.tv_nsec);
-      ts.tv_sec += ats->tv_sec;
-      ts.tv_nsec += ats->tv_nsec;
-      int ret;
-      while (1) {
-	struct timespec zts = {.tv_sec = 0, .tv_nsec = 0};
-	if (a6) {
-	  struct timespec ts2;
-	  clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
-	  double diff_nsec = (ts2.tv_sec - ts.tv_sec) * 1e9 + (ts2.tv_nsec - ts.tv_nsec);
-	  if (diff_nsec > 0)
-	    return 0;
+    case SYS_close:
+      {
+	int fd = a2;
+	if (hookfds[fd] >= 0) {
+	  myfs_close();
+	  printf("close for mylib: fd=%d\n", fd);
+	  hookfds[fd] = NOT_USED_FD;
 	}
-	ret = next_sys_call(a1, a2, a3, a4, a5, (long)&zts, a7);
-	if (ret) {
-	  return ret;
+	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+      }
+    case 270: // select
+      {
+	struct timespec *ats = (struct timespec *) a6;
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+	ts.tv_sec += ats->tv_sec;
+	ts.tv_nsec += ats->tv_nsec;
+	int ret;
+	while (1) {
+	  struct timespec zts = {.tv_sec = 0, .tv_nsec = 0};
+	  if (a6) {
+	    struct timespec ts2;
+	    clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
+	    double diff_nsec = (ts2.tv_sec - ts.tv_sec) * 1e9 + (ts2.tv_nsec - ts.tv_nsec);
+	    if (diff_nsec > 0)
+	      return 0;
+	  }
+	  ret = next_sys_call(a1, a2, a3, a4, a5, (long)&zts, a7);
+	  if (ret) {
+	    return ret;
+	  }
+	  ABT_thread_yield();
 	}
-	ABT_thread_yield();
       }
-    } else if (a1 == 0) { // read
-      int hookfd = hookfds[a2];
-      char *buf = (char *)a3;
-      loff_t len = a4;
-      //printf("read %d\n", a2);
-      if (hookfd >= 0) {
-	read_impl(hookfd, len, cur_pos[a2], buf);
-	cur_pos[a2] += len;
-	return len;
-      } else {
-	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+    case SYS_read:
+      {
+	int fd = a2;
+	char *buf = (char *)a3;
+	size_t count = a4;
+	int hookfd = hookfds[fd];
+	if (hookfd >= 0) {
+	  read_impl(hookfd, count, cur_pos[fd], buf);
+	  cur_pos[fd] += count;
+	  return count;
+	} else {
+	  return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+	}
       }
-    } else if (a1 == 17) { // pread64
-      int hookfd = hookfds[a2];
-      char *buf = (char *)a3;
-      loff_t len = a4;
-      loff_t pos = a5;
-      //printf("pread64 fd %d len %ld pos %ld\n", a2, len, pos);
-      if (hookfd >= 0) {
-	read_impl(hookfd, len, pos, buf);
-	return len;
-      } else {
-	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+    case 17: // pread64
+      {
+	int fd = a2;
+	char *buf = (char *)a3;
+	size_t count = a4;
+	loff_t pos = a5;
+	int hookfd = hookfds[fd];
+	if (hookfd >= 0) {
+	  read_impl(hookfd, count, pos, buf);
+	  return count;
+	} else {
+	  return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+	}
       }
-    } else if (a1 == 1) { // write
-      int hookfd = hookfds[a2];
-      char *buf = (char *)a3;
-      loff_t len = a4;
-      if (hookfd >= 0) {
-	write_impl(hookfd, len, cur_pos[a2], buf);
-	cur_pos[a2] += len;
-	return len;
-      } else {
-	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+    case SYS_write:
+      {
+	int hookfd = hookfds[a2];
+	char *buf = (char *)a3;
+	loff_t len = a4;
+	if (hookfd >= 0) {
+	  write_impl(hookfd, len, cur_pos[a2], buf);
+	  cur_pos[a2] += len;
+	  return len;
+	} else {
+	  return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+	}
       }
-    } else if (a1 == 186) { // gettid
+    case 186: // gettid
       return abt_id;
-    } else if (a1 == 18) { // pwrite64
-      int hookfd = hookfds[a2];
-      char *buf = (char *)a3;
-      loff_t len = a4;
-      loff_t pos = a5;
-      //printf("pwrite64 %d hookfd=%d, len=%ld, pos=%ld\n", a2, hookfd, len, pos);
-      if (hookfd >= 0) {
+    case 18: // pwrite64
+      {
+	int hookfd = hookfds[a2];
+	char *buf = (char *)a3;
+	loff_t len = a4;
+	loff_t pos = a5;
 	//printf("pwrite64 %d hookfd=%d, len=%ld, pos=%ld\n", a2, hookfd, len, pos);
-	write_impl(hookfd, len, pos, buf);
-	return len;
-      } else {
-	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+	if (hookfd >= 0) {
+	  //printf("pwrite64 %d hookfd=%d, len=%ld, pos=%ld\n", a2, hookfd, len, pos);
+	  write_impl(hookfd, len, pos, buf);
+	  return len;
+	} else {
+	  return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+	}
       }
-    } else if (a1 == 262) { // fstat
+    case 262: // fstat
       if (((int32_t)a2 >= 0) && (hookfds[a2] >= 0)) {
 	uint64_t sz = myfs_get_size(hookfds[a2]);
 	struct stat *statbuf = (struct stat*)a4;
@@ -355,7 +368,7 @@ long hook_function(long a1, long a2, long a3,
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
-    } else if (a1 == 208) { // io_getevents
+    case 208: // io_getevents
       int min_nr = a3;
       int nr = a4;
       int completed = 0;
@@ -396,7 +409,7 @@ long hook_function(long a1, long a2, long a3,
       }
       //printf("completed %d\n", completed);
       return completed;
-    } else if (a1 == 209) { // io_submit
+    case 209: // io_submit
       int tid = get_tid();
       struct iocb **ios = (struct iocb **)a4;
       int n_io = a3;
@@ -452,19 +465,19 @@ long hook_function(long a1, long a2, long a3,
 	cur_aio_wp = (cur_aio_wp + 1) % cur_aio_max;
       }
       return i;//return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-    } else if (a1 == 206) { // io_setup
+    case 206: // io_setup
       cur_aio_max = a2;
       cur_aio_wp = 0;
       cur_aio_rp = 0;
       cur_aio_max = a2;
       printf("io_setup %d %p %p\n", cur_aio_max, (void *)a3, cur_aios);
       return 0;
-    } else if (a1 == 207) { // io_destroy
+    case 207: // io_destroy
       printf("io_destroy %ld %p\n", a2, (void *)a3);
       return 0;
-    } else if (1) {
+    default:
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-    } else {
+      /*
       req_helper(abt_id, a1, a2, a3, a4, a5, a6, a7);
       while (1) {
 	if (helpers[abt_id].done)
@@ -474,11 +487,14 @@ long hook_function(long a1, long a2, long a3,
 	//int ret = ABT_self_get_pre_id(&pre_id);
       }
       return helpers[abt_id].ret;
+      */
     }
   } else {
+    /*
     if ((a1 == 1) || (a1 == 18)) {
       printf("outside write %ld %ld\n", a1, a2);
     }
+    */
     return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
   }
 }
@@ -497,7 +513,7 @@ int __hook_init(long placeholder __attribute__((unused)),
   init_hooked_filename();
   int i;
   for (i=0; i<MAX_HOOKFD; i++) {
-    hookfds[i] = -1;
+    hookfds[i] = NOT_USED_FD;
   }
   
   load_debug();

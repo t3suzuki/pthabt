@@ -132,10 +132,16 @@ myfs_get_lba(int i, uint64_t offset, int write) {
 }
 
 void
-myfs_umount()
+myfs_close()
 {
   fsync(superblock_fd);
   printf("%s %d  wp=%ld\n", __func__, __LINE__, superblock->block_wp);
+}
+
+void
+myfs_umount()
+{
+  myfs_close();
 }
 
 
