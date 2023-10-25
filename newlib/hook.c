@@ -181,16 +181,14 @@ hook_openat(long a1, long a2, long a3,
   mode_t mode = a5;
 
   int ret = next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-  if (flags & O_DIRECT) {
-    if (is_hooked_filename(filename)) {
-      printf("hooked file: fd=%d dfd=%d filename=%s flags=%o mode=%o\n", ret, dfd, filename, flags, mode);
-      if (ret < MAX_HOOKFD) {
-	hookfds[ret] = myfs_open(filename);
-	cur_pos[ret] = 0;
-      } else {
-	printf("error: reached upper limit of opened files.\n");
-	assert(0);
-      }
+  if (is_hooked_filename(filename)) {
+    printf("hooked file: fd=%d dfd=%d filename=%s flags=%o mode=%o\n", ret, dfd, filename, flags, mode);
+    if (ret < MAX_HOOKFD) {
+      hookfds[ret] = myfs_open(filename);
+      cur_pos[ret] = 0;
+    } else {
+      printf("error: reached upper limit of opened files.\n");
+      assert(0);
     }
   }
   return ret;
@@ -201,7 +199,8 @@ hook_clock_nanosleep(clockid_t which_clock, int flags,
 		     const struct timespec *req,
 		     struct timespec *rem)
 {
-  printf("%s clock=%d flags=%d\n", __func__, which_clock, flags);
+  assert(which_clock == 0);
+  //printf("%s clock=%d flags=%d\n", __func__, which_clock, flags);
   assert(flags == 0); // implemented relative time only.
   struct timespec alarm;
   clock_gettime(CLOCK_MONOTONIC_COARSE, &alarm);
@@ -243,7 +242,7 @@ long hook_function(long a1, long a2, long a3,
     if (debug_print) {
       debug_print(1, a1, abt_id);
     }
-    if (a1 == SYS_nanosleep) {
+    if (a1 == 230) { // nanosleep
       return hook_clock_nanosleep(a2, a3, (struct timespec *)a4, (struct timespec *)a5);
     } else if (a1 == 441) { // epoll_pwait2
       struct timespec tsz = {.tv_sec = 0, .tv_nsec = 0};
@@ -507,7 +506,7 @@ int __hook_init(long placeholder __attribute__((unused)),
 #ifdef MYDIR
   printf("hooked rocksdb name : %s\n", MYDIR);
 #endif
-  myfs_mount("/root/myfs_superblock");
+  myfs_mount("/root/myfs_superblock2");
 
   int i;
   for (i=0; i<MAX_HOOKFD; i++) {
