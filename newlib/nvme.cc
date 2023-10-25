@@ -29,10 +29,11 @@ extern "C" {
 #define N_2MB_PAGE MAX(QD * BLKSZ / (2*1024*1024), 1)
 
 
-static int enable_bus_master(int uio_index)
+static int enable_bus_master(char *pci_addr)
 {
   char path[256];
-  sprintf(path, "/sys/class/uio/uio%d/device/config", uio_index);
+  //sprintf(path, "/sys/class/uio/uio%d/device/config", uio_index);
+  sprintf(path, "/sys/bus/pci/devices/%s/config", pci_addr);
   int fd = open(path, O_RDWR);
   uint32_t val;
   int ret = pread(fd, &val, 4, 0x4);
@@ -347,16 +348,18 @@ create_qp(int did, int new_qid)
 }
 
 int
-__nvme_init(int did, int uio_index)
+__nvme_init(int did, char *pci_addr)
 {
   volatile uint32_t *regs32;
   volatile uint64_t *regs64;
   const int wait_us = 100000;
 
-  enable_bus_master(uio_index);
+  enable_bus_master(pci_addr);
   
   char path[256];
-  sprintf(path, "/sys/class/uio/uio%d/device/resource0", uio_index);
+  //sprintf(path, "/sys/class/uio/uio%d/device/resource0", uio_index);
+  sprintf(path, "/sys/bus/pci/devices/%s/resource0", pci_addr);
+  printf("%s\n", path);
   int fd = open(path, O_RDWR);
   if (fd < 0) {
     perror("open");
@@ -442,12 +445,17 @@ nvme_init()
   int i = 0;
   int j = 0;
   while (s[i] != '\0') {
-    int uio_id = atoi(&s[i]);
-    printf("nvme_init %d %d\n", j, uio_id);
-    __nvme_init(j++, uio_id);
+    char pci_addr[13];
+    //printf("nvme_init %d %d\n", j, uio_id);
+    memcpy(pci_addr, &s[i], 12);
+    printf("nvme_init %d %s\n", j, pci_addr);
+    __nvme_init(j++, pci_addr);
     if (j == ND)
       break;
     while (s[i] != ' ' && s[i] != '\0') {
+      i++;
+    }
+    while (s[i] == ' ' && s[i] != '\0') {
       i++;
     }
   }
