@@ -140,4 +140,11 @@ INLINE int real_pthread_setname_np(pthread_t pth, const char *name) {
   return ret;
 }
 
+INLINE int real_pthread_condattr_getclock(const pthread_condattr_t *attr, clockid_t *clock_id) {
+  int (*dlsym_pthread_condattr_getclock)(const pthread_condattr_t *attr, clockid_t *clock_id);
+  dlsym_pthread_condattr_getclock = dltrans("pthread_condattr_getclock");
+  int ret = dlsym_pthread_condattr_getclock(attr, clock_id);
+  return ret;
+}
+
 #endif

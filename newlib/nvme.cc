@@ -400,10 +400,12 @@ __nvme_init(int did, int uio_index)
   // enable controller.
   cc = 0x460001;
   regs32[0x14 / sizeof(uint32_t)] = cc; // cc enable
-  usleep(wait_us);
-  csts = regs32[0x1c / sizeof(uint32_t)]; // check csts
-  //printf("csts = %u\n", csts);
-  assert(csts == 1);
+  do {
+    usleep(wait_us);
+    csts = regs32[0x1c / sizeof(uint32_t)]; // check csts
+    //printf("csts = %u\n", csts);
+  } while (csts != 1);
+  //assert(csts == 1);
 
 
   // identity

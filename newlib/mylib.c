@@ -142,7 +142,13 @@ int pthread_cond_init(pthread_cond_t *cond,
 #endif
   abt_cond_wrap_t *abt_cond_wrap = (abt_cond_wrap_t *)malloc(sizeof(abt_cond_wrap_t));
   abt_cond_wrap->magic = 0xdeadbeef;
+#if 1
   int ret = ABT_cond_create(&abt_cond_wrap->abt_cond);
+#else
+  clockid_t clock_id;
+  real_pthread_condattr_getclock(attr, &clock_id);
+  int ret = ABT_cond_create2(&abt_cond_wrap->abt_cond, clock_id);
+#endif
   *(abt_cond_wrap_t **)cond = abt_cond_wrap;
   return ret;
 }
