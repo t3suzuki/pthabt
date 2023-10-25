@@ -72,11 +72,6 @@ void do_helper(void *arg) {
   }
 }
 
-//#define FOR_KVELL (1)
-#define FOR_ROCKSDB (1)
-//#define FOR_FIO (1)
-#define FOR_WT (1)
-
 static char *hooked_filename;
 static char *hooked_rocksdb_dir;
 static void init_hooked_filename() {
@@ -92,38 +87,6 @@ static void init_hooked_filename() {
 
 int is_hooked_filename(const char *filename)
 {
-
-#if 0
-  int ret = 0;
-#if FOR_FIO
-#define MYFILE ("myfile")
-  ret |= strncmp(MYFILE, filename, strlen(MYFILE)) == 0;
-#endif
-
-#if FOR_ROCKSDB
-#define MYDIR ("/home/tomoya-s/mountpoint/tomoya-s/rocksdb_abt400m/")
-#define MYSUFFIX (".sst")  
-  ret |= ((strncmp(MYDIR, filename, strlen(MYDIR)) == 0) &&
-	  (strncmp(MYSUFFIX, filename + strlen(MYDIR) + 6, strlen(MYSUFFIX)) == 0));
-
-#define MYDIR5 ("/tmp/myfile5/")
-  ret |= ((strncmp(MYDIR5, filename, strlen(MYDIR5)) == 0) &&
-	  (strncmp(MYSUFFIX, filename + strlen(MYDIR5) + 6, strlen(MYSUFFIX)) == 0));
-#endif
-
-#if FOR_KVELL
-#define MYDIR ("/home/tomoya-s/mountpoint/tomoya-s/KVell/db/")
-#define MYPREFIX ("slab")  
-  ret |= ((strncmp(MYDIR, filename, strlen(MYDIR)) == 0) &&
-	  (strncmp(MYPREFIX, filename + strlen(MYDIR), strlen(MYPREFIX)) == 0));
-#endif
-  
-#if FOR_WT
-#define MYFILE ("/home/tomoya-s/mountpoint2/tomoya-s/wt_abt250k/test.wt")
-  ret |= (strncmp(MYFILE, filename, strlen(MYFILE)) == 0);
-#endif
-
-#else
   int ret = 0;
   if (hooked_filename) {
     ret |= (strncmp(hooked_filename, filename, strlen(hooked_filename)) == 0);
@@ -134,7 +97,6 @@ int is_hooked_filename(const char *filename)
     ret |= ((strncmp(hooked_rocksdb_dir, filename, strlen(hooked_rocksdb_dir)) == 0) &&
 	    (strncmp(sst_suffix, filename + strlen(hooked_rocksdb_dir) + sst_filename_len, strlen(sst_suffix)) == 0));
   }
-#endif
   return ret;
 }
 
