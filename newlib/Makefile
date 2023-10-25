@@ -4,7 +4,7 @@ ND ?= 1
 
 FLAGS = -O3 -g
 FLAGS += -fpic
-FLAGS += -DN_TH=$(N_TH) -DND=$(ND)
+FLAGS += -DN_TH=$(N_TH) -DND=$(ND) -DUSE_PREEMPT=1
 #FLAGS += -DDEBUG=1
 
 #ABT_PATH ?= $(HOME)/argobots/install
