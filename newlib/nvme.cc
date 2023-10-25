@@ -433,7 +433,10 @@ nvme_init()
   int j = 0;
   while (s[i] != '\0') {
     int uio_id = atoi(&s[i]);
+    printf("nvme_init %d %d\n", j, uio_id);
     __nvme_init(j++, uio_id);
+    if (j == ND)
+      break;
     while (s[i] != ' ' && s[i] != '\0') {
       i++;
     }
