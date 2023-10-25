@@ -6,9 +6,6 @@
 #include "common.h"
 
 
-
-//#define NEW_JOIN (1)
-
 static ABT_xstream abt_xstreams[N_TH];
 static ABT_thread abt_threads[ULT_N_TH];
 static ABT_pool global_abt_pools[N_TH];
@@ -56,23 +53,8 @@ int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
   return 0;
 }
 
-#if NEW_JOIN
-void
-new_join(void *arg)
-{
-  ABT_thread *abt_thread = (ABT_thread *)arg;
-  ABT_thread_join(*abt_thread);
-}
-#endif
-
 int pthread_join(pthread_t pth, void **retval) {
-#if NEW_JOIN
-  pthread_t pth_for_new_join;
-  real_pthread_create(&pth_for_new_join, NULL, (void *(*)(void *))new_join, (ABT_thread *)pth);
-  real_pthread_join(pth_for_new_join, NULL);
-#else
   ABT_thread_join(*(ABT_thread *)pth);
-#endif
   return 0;
 }
 
@@ -369,16 +351,10 @@ mylib_init()
   int i;
   printf(".so argobots!\n");
   ABT_init(0, NULL);
-#if NEW_JOIN
-  for (i=0; i<N_TH; i++) {
-    ABT_xstream_create(ABT_SCHED_NULL, &abt_xstreams[i]);
-  }
-#else
   ABT_xstream_self(&abt_xstreams[0]);
   for (i=1; i<N_TH; i++) {
     ABT_xstream_create(ABT_SCHED_NULL, &abt_xstreams[i]);
   }
-#endif
   for (i=0; i<N_TH; i++) {
     ABT_xstream_set_cpubind(abt_xstreams[i], i);
     ABT_xstream_get_main_pools(abt_xstreams[i], 1, &global_abt_pools[i]);
