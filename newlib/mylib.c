@@ -10,7 +10,9 @@ static ABT_xstream abt_xstreams[N_TH];
 static ABT_thread abt_threads[ULT_N_TH];
 static ABT_pool global_abt_pools[N_TH];
 static unsigned int global_my_tid = 0;
+#if USE_PREEMPT
 static ABT_preemption_group abt_preemption_group;
+#endif
 
 //#define __PTHREAD_VERBOSE__ (1)
 
@@ -285,7 +287,7 @@ int pthread_key_delete(pthread_key_t key) {
 
 int pthread_rwlock_init(pthread_rwlock_t *rwlock,
 			const pthread_rwlockattr_t *attr) {
-  
+
   ABT_rwlock *abt_rwlock = (ABT_rwlock *)malloc(sizeof(ABT_rwlock));
   ABT_rwlock_create(abt_rwlock);
   *(ABT_rwlock **)rwlock = abt_rwlock;
@@ -369,17 +371,7 @@ abt_init()
 {
   int i;
   ABT_init(0, NULL);
-#if 0
-  printf(".so argobots!\n");
-  ABT_xstream_self(&abt_xstreams[0]);
-  for (i=1; i<N_TH; i++) {
-    ABT_xstream_create(ABT_SCHED_NULL, &abt_xstreams[i]);
-  }
-  for (i=0; i<N_TH; i++) {
-    ABT_xstream_set_cpubind(abt_xstreams[i], i);
-    ABT_xstream_get_main_pools(abt_xstreams[i], 1, &global_abt_pools[i]);
-  }
-#else
+#if USE_PREEMPT
   printf(".so argobots with preempt!\n");
   for (i=0; i<N_TH; i++) {
     ABT_pool_create_basic(ABT_POOL_FIFO, ABT_POOL_ACCESS_MPMC, ABT_TRUE, &global_abt_pools[i]);
@@ -401,6 +393,16 @@ abt_init()
   ABT_preemption_timer_create_groups(1, &abt_preemption_group);
   ABT_preemption_timer_set_xstreams(abt_preemption_group, N_TH, abt_xstreams);
   ABT_preemption_timer_start(abt_preemption_group);
+#else
+  printf(".so argobots!\n");
+  ABT_xstream_self(&abt_xstreams[0]);
+  for (i=1; i<N_TH; i++) {
+    ABT_xstream_create(ABT_SCHED_NULL, &abt_xstreams[i]);
+  }
+  for (i=0; i<N_TH; i++) {
+    ABT_xstream_set_cpubind(abt_xstreams[i], i);
+    ABT_xstream_get_main_pools(abt_xstreams[i], 1, &global_abt_pools[i]);
+  }
 #endif
   ABT_mutex_create(&abt_key_mutex);
 }
