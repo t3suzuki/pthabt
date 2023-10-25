@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <assert.h>
 #include <vector>
+#include <string>
 #include "common.h"
 #include <time.h>
 #include <zlib.h>
@@ -19,7 +20,7 @@
 extern "C" {
 #include "nvme.h"
   
-#define ND (2)
+  //#define ND (1)
 #define NQ (N_TH)
 #define QD (N_ULT*2)
 #define AQD (8)
@@ -338,7 +339,7 @@ create_qp(int did, int new_qid)
 }
 
 int
-nvme_init(int did, int uio_index)
+__nvme_init(int did, int uio_index)
 {
   volatile uint32_t *regs32;
   volatile uint64_t *regs64;
@@ -422,6 +423,23 @@ nvme_init(int did, int uio_index)
   return 0;
 }
 
+void
+nvme_init()
+{
+  char *s = getenv("DRIVE_IDS");
+  assert(s);
+  printf("ND=%d drive_ids : %s\n", ND, s);
+  int i = 0;
+  int j = 0;
+  while (s[i] != '\0') {
+    int uio_id = atoi(&s[i]);
+    __nvme_init(j++, uio_id);
+    while (s[i] != ' ' && s[i] != '\0') {
+      i++;
+    }
+  }
+}
+
 int
 nvme_read_req(int64_t lba, int num_blk, int tid, int len, char *buf)
 {
@@ -433,7 +451,6 @@ nvme_read_req(int64_t lba, int num_blk, int tid, int len, char *buf)
 
   disable_preempt_ult();
   sqe_t *sqe = qp->new_sqe(&cid);
-  //qps[qid]->get_buf4k(cid)[0] = 0xff;
   //bzero(sqe, sizeof(sqe_t));
   sqe->PRP1 = qp->buf4k_pa(cid);
   sqe->CDW0.OPC = 0x2; // read
@@ -441,20 +458,6 @@ nvme_read_req(int64_t lba, int num_blk, int tid, int len, char *buf)
   sqe->CDW10 = ((lba / RAID_FACTOR) / ND * RAID_FACTOR) + (lba % RAID_FACTOR);
   sqe->CDW12 = num_blk - 1;
   //sqe->CDW0.CID = ((lba & 0xff) << 8) | cid;
-  //if (debug_print)
-  //debug_print(520, lba, cid);
-  /*
-  bzero(qps[qid]->get_buf4k(cid), 512);
-  {
-    unsigned char *buf = (unsigned char *)qps[qid]->get_buf4k(cid);
-    int i;
-    for (i=0; i<512; i++) {
-      printf("%02x ", buf[i]);
-      if (i % 16 == 15)
-	printf("\n");
-    }
-  }
-  */
   
   //printf("read_req qid=%d cid=%d lba=%d buf4k=%p buf4k[0]=%02x\n", qid, cid, lba, qps[qid]->get_buf4k(cid), qps[qid]->get_buf4k(cid)[0]);
   qp->rbuf[cid] = buf;
@@ -479,9 +482,11 @@ nvme_check(int rid)
   //printf("%s %d rid=%d did=%d qid=%d\n", __func__, __LINE__, rid, did, qid);
   QP *qp = qps[did][qid];
   unsigned char c = qp->get_buf4k(cid)[0];
+  
   disable_preempt_ult();
   qp->check_cq();
   enable_preempt_ult();
+  
   if (qp->done(cid)) {
     return 1;
   }

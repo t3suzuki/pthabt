@@ -529,12 +529,8 @@ int __hook_init(long placeholder __attribute__((unused)),
   next_sys_call = *((syscall_fn_t *) sys_call_hook_ptr);
   *((syscall_fn_t *) sys_call_hook_ptr) = hook_function;
 
-  nvme_init(0, 20);
-  //nvme_init(1, 19);
-  /*
-  nvme_init(2, 18);
-  nvme_init(3, 20);
-  */
+
+  nvme_init();
   
   return 0;
 

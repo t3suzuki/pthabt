@@ -1,9 +1,10 @@
 
 N_TH ?= 1
+ND ?= 1
 
 FLAGS = -O3 -g
 FLAGS += -fpic
-FLAGS += -DN_TH=$(N_TH)
+FLAGS += -DN_TH=$(N_TH) -DND=$(ND)
 #FLAGS += -DDEBUG=1
 
 ABT_PATH ?= $(HOME)/argobots/install
