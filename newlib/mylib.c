@@ -43,18 +43,19 @@ int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
 			      arg,
 			      ABT_THREAD_ATTR_NULL,
 			      abt_thread);
+#if __PTHREAD_VERBOSE__
   unsigned long long abt_id;
   ABT_thread_get_id(*abt_thread, (ABT_unit_id *)&abt_id);
-#if __PTHREAD_VERBOSE__
   printf("%s %d ABT_id %llu @ core %d\n", __func__, __LINE__, abt_id, my_tid % N_TH);
-#endif
   //print_bt();
+#endif
   *pth = (pthread_t)abt_thread;
   return 0;
 }
 
 int pthread_join(pthread_t pth, void **retval) {
   ABT_thread_join(*(ABT_thread *)pth);
+  free((ABT_thread *)pth);
   return 0;
 }
 
@@ -125,7 +126,10 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex) {
   printf("%s %d\n", __func__, __LINE__);
 #endif
   ABT_mutex *abt_mutex = get_abt_mutex(mutex);
-  return ABT_mutex_free(abt_mutex);
+  int ret = ABT_mutex_free(abt_mutex);
+  abt_mutex_wrap_t *abt_mutex_wrap = *(abt_mutex_wrap_t **)mutex;
+  free(abt_mutex_wrap);
+  return ret;
 }
 
 
@@ -145,13 +149,6 @@ int pthread_cond_init(pthread_cond_t *cond,
 
 inline static ABT_cond *get_abt_cond(pthread_cond_t *cond)
 {
-  if (0) {
-    int pool_id;
-    uint64_t abt_id;
-    ABT_self_get_last_pool_id(&pool_id);
-    ABT_self_get_thread_id(&abt_id);
-    printf("%lu pool_id %d\n", abt_id, pool_id);
-  }
   if (*(my_magic_t *)cond == 0) {
     pthread_cond_init(cond, NULL);
   }
@@ -172,7 +169,10 @@ int pthread_cond_destroy(pthread_cond_t *cond) {
   printf("%s %d %p\n", __func__, __LINE__, cond);
 #endif
   ABT_cond *abt_cond = get_abt_cond(cond);
-  return ABT_cond_free(abt_cond);
+  int ret = ABT_cond_free(abt_cond);
+  abt_cond_wrap_t *abt_cond_wrap = *(abt_cond_wrap_t **)cond;
+  free(abt_cond_wrap);
+  return ret;
 }
 
 int pthread_cond_wait(pthread_cond_t *cond,
@@ -184,7 +184,6 @@ int pthread_cond_wait(pthread_cond_t *cond,
   ABT_mutex *abt_mutex = get_abt_mutex(mutex);
   //printf("%s %d %p %p\n", __func__, __LINE__, cond, abt_cond);
   int ret = ABT_cond_wait(*abt_cond, *abt_mutex);
-  //printf("%s %d %p\n", __func__, __LINE__, cond);
   return ret;
 }
 
@@ -209,7 +208,6 @@ int pthread_cond_timedwait(pthread_cond_t *cond,
   int ret = ABT_cond_timedwait(*abt_cond, *abt_mutex, abstime);
   //printf("%s %d %p %d\n", __func__, __LINE__, cond, ret);
   if (ret == ABT_ERR_COND_TIMEDOUT) {
-    //printf("%s timeout\n", __func__, __LINE__);
     return ETIMEDOUT;
   } else {
     return 0;
@@ -228,22 +226,31 @@ int pthread_cond_clockwait(pthread_cond_t *cond,
 
 
 #define N_KEY (1024)
-ABT_key *abt_keys[N_KEY];
+static ABT_key *abt_keys[N_KEY];
+static ABT_mutex abt_key_mutex;
 
 int pthread_key_create(pthread_key_t *key, void (*destructor)(void*)) {
 #if __PTHREAD_VERBOSE__
   printf("%s %d %p\n", __func__, __LINE__, key);
 #endif
+  
+  ABT_mutex_lock(abt_key_mutex);
   int i_key;
   for (i_key=0; i_key<N_KEY; i_key++) {
     if (abt_keys[i_key] == 0) {
       break;
     }
   }
-  abt_keys[i_key] = (ABT_key *)malloc(sizeof(ABT_key));
-  int ret = ABT_key_create(destructor, abt_keys[i_key]);
-  *key = i_key;
-  return ret;
+  if (i_key < N_KEY) {
+    abt_keys[i_key] = (ABT_key *)malloc(sizeof(ABT_key));
+    int ret = ABT_key_create(destructor, abt_keys[i_key]);
+    *key = i_key;
+    ABT_mutex_unlock(abt_key_mutex);
+    return ret;
+  } else {
+    ABT_mutex_unlock(abt_key_mutex);
+    return EAGAIN;
+  }
 }
 
 int pthread_setspecific(pthread_key_t key, const void *value) {
@@ -263,7 +270,10 @@ void * pthread_getspecific(pthread_key_t key) {
 }
 
 int pthread_key_delete(pthread_key_t key) {
-  return ABT_key_free(abt_keys[key]);
+  int ret = ABT_key_free(abt_keys[key]);
+  free(abt_keys[key]);
+  abt_keys[key] = 0;
+  return ret;
 }
 
 int pthread_rwlock_init(pthread_rwlock_t *rwlock,
@@ -302,7 +312,9 @@ int pthread_rwlock_unlock(pthread_rwlock_t *rwlock)
 int pthread_rwlock_destory(pthread_rwlock_t *rwlock)
 {
   ABT_rwlock *abt_rwlock = get_abt_rwlock(rwlock);
-  return ABT_rwlock_free(abt_rwlock);
+  int ret = ABT_rwlock_free(abt_rwlock);
+  free(abt_rwlock);
+  return ret;
 }
 
 int pthread_once(pthread_once_t *once_control,
@@ -360,6 +372,7 @@ mylib_init()
     ABT_xstream_get_main_pools(abt_xstreams[i], 1, &global_abt_pools[i]);
   }
 
+  ABT_mutex_create(&abt_key_mutex);
   fflush(0);
   //sleep(1);
   
