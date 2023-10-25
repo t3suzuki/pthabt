@@ -119,6 +119,7 @@ public:
   int n_sqe;
   int n_cqe;
   const int sq_offset = 0x4000;
+  ABT_mutex mutex;
 private:
   int sq_tail;
   //int sq_head;
@@ -173,6 +174,13 @@ public:
       sqe->CDW0.CID = i;
     }
     doorbell = &regs32[0x1000 / sizeof(uint32_t) + 2 * qid];
+    ABT_mutex_create(&mutex);
+  }
+  inline void lock() {
+    ABT_mutex_lock(mutex);
+  }
+  inline void unlock() {
+    ABT_mutex_unlock(mutex);
   }
   uint64_t cq_pa() {
     return v2p((size_t)sqcq);
@@ -180,12 +188,12 @@ public:
   uint64_t sq_pa() {
     return v2p((size_t)sqcq) + sq_offset;
   }
-  uint64_t buf4k_pa(int cid) {
+  inline uint64_t buf4k_pa(int cid) {
     int cid_upper = cid % N_2MB_PAGE;
     int cid_lower = cid / N_2MB_PAGE;
     return _buf4k_pa[cid_upper] + BLKSZ * cid_lower;
   }
-  sqe_t *new_sqe(int *ret_cid = nullptr) {
+  inline sqe_t *new_sqe(int *ret_cid = nullptr) {
     sqe_t *sqe = get_sqe(sq_tail);
     int new_sq_tail = (sq_tail + 1) % n_sqe;
     //printf("new_sqe %d %d->%d %d %p\n", __LINE__, sq_tail, new_sq_tail, cq_head, this);
@@ -204,11 +212,11 @@ public:
     //printf("new_sqe %d %d->%d %d %p\n", __LINE__, sq_tail, new_sq_tail, cq_head, this);
     return sqe;
   }
-  void sq_doorbell() {
+  inline void sq_doorbell() {
     asm volatile ("" : : : "memory");
     *(doorbell) = sq_tail;
   }
-  char *get_buf4k(int cid) {
+  inline char *get_buf4k(int cid) {
     int cid_upper = cid % N_2MB_PAGE;
     int cid_lower = cid / N_2MB_PAGE;
     return buf4k[cid_upper] + BLKSZ * cid_lower;
@@ -300,7 +308,7 @@ public:
       //sleep(1);
     }
   }
-  int done(int cid) {
+  inline int done(int cid) {
     return (done_flag[cid] == 1);
   }
 };
@@ -452,7 +460,7 @@ nvme_read_req(int64_t lba, int num_blk, int tid, int len, char *buf)
 
   QP *qp = qps[did][qid];
 
-  disable_preempt_ult();
+  qp->lock();
   sqe_t *sqe = qp->new_sqe(&cid);
   //bzero(sqe, sizeof(sqe_t));
   sqe->PRP1 = qp->buf4k_pa(cid);
@@ -469,7 +477,7 @@ nvme_read_req(int64_t lba, int num_blk, int tid, int len, char *buf)
   qp->lba[cid] = lba;
   #endif
   qp->sq_doorbell();
-  enable_preempt_ult();
+  qp->unlock();
   
   int rid = did*QD*NQ + tid*QD + cid;
   //printf("%s rid = %d lba = %d did=%d,tid=%d,cid=%d,buf=%p,len=%d\n", __func__, rid, lba, did, tid, cid, buf, len);
@@ -486,9 +494,9 @@ nvme_check(int rid)
   QP *qp = qps[did][qid];
   unsigned char c = qp->get_buf4k(cid)[0];
   
-  disable_preempt_ult();
+  qp->lock();
   qp->check_cq();
-  enable_preempt_ult();
+  qp->unlock();
   
   if (qp->done(cid)) {
     return 1;
@@ -505,7 +513,7 @@ nvme_write_req(int64_t lba, int num_blk, int tid, int len, char *buf)
   QP *qp = qps[did][qid];
 
 
-  disable_preempt_ult();
+  qp->lock();
   sqe_t *sqe = qp->new_sqe(&cid);
   memcpy(qp->get_buf4k(cid), buf, len);
   sqe->PRP1 = qp->buf4k_pa(cid);
@@ -516,7 +524,7 @@ nvme_write_req(int64_t lba, int num_blk, int tid, int len, char *buf)
   qp->rbuf[cid] = NULL;
   qp->len[cid] = 0;
   qp->sq_doorbell();
-  enable_preempt_ult();
+  qp->unlock();
   
   int rid = did*QD*NQ + tid*QD + cid;
 
