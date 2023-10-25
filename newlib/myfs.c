@@ -14,6 +14,7 @@
 #include "common.h"
 
 #define MYFS_BLOCK_SIZE (2*1024*1024)
+#define NUM_BLOCKS (4*1024*1024)
 
 #define MYFS_MAX_BLOCKS_PER_FILE (1024*256)
 #define MYFS_MAX_NAMELEN (1024)
@@ -22,14 +23,15 @@
 typedef struct {
   char name[MYFS_MAX_NAMELEN];
   int32_t block[MYFS_MAX_BLOCKS_PER_FILE];
-  uint64_t total_size;
-  uint64_t tail_block;
+  uint64_t n_block;
   ABT_mutex abt_mutex;
 } file_t;
 
 typedef struct {
   uint64_t magic;
-  uint64_t block_wp;
+  int32_t free_blocks[NUM_BLOCKS];
+  int32_t free_blocks_rp;
+  int32_t free_blocks_wp;
   file_t file[MYFS_MAX_FILES];
 } superblock_t;
 
@@ -50,32 +52,40 @@ myfs_init()
       superblock->file[i].block[j] = INACTIVE_BLOCK;
     }
   }
+  for (i=0; i<NUM_BLOCKS-1; i++) {
+    superblock->free_blocks[i] = i;
+  }
+  superblock->free_blocks_rp = 0;
+  superblock->free_blocks_wp = NUM_BLOCKS - 1;
   superblock->magic = MAGIC;
-  superblock->block_wp = 0;
 }
 
 uint64_t
 myfs_get_size(int i) {
-  printf("file %d get tail_block %ld\n", i, superblock->file[i].tail_block);
-  return superblock->file[i].tail_block * MYFS_BLOCK_SIZE;
+  printf("file %d get n_block %ld\n", i, superblock->file[i].n_block);
+  return superblock->file[i].n_block * MYFS_BLOCK_SIZE;
+}
+
+static int
+myfs_used_blocks()
+{
+  int rp = superblock->free_blocks_rp;
+  int wp = superblock->free_blocks_wp;
+  if (rp < wp) {
+    return rp + NUM_BLOCKS - wp - 1;
+  } else {
+    return rp - wp - 1;
+  }
 }
 
 void
 myfs_mount(char *myfs_superblock)
 {
   int superblock_fd = open(myfs_superblock, O_RDWR);
-  int new_flag = 0;
   if (superblock_fd < 0) {
-    if (errno == ENOENT) {
-      printf("Failed to open superblock file. Then, create new superblock file.\n");
-      superblock_fd = open(myfs_superblock, O_RDWR|O_CREAT, 0666);
-      new_flag = 1;
-    } else {
-      perror("open");
-    }
+    perror("open");
   }
   size_t page_size = getpagesize();
-  //superblock = (superblock_t *)mmap(0, sizeof(superblock_t), PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
   superblock = (superblock_t *)mmap(0, page_size*16384*2, PROT_READ|PROT_WRITE, MAP_SHARED, superblock_fd, 0);
   if (superblock == MAP_FAILED)
     perror("mmap superblock file");
@@ -83,7 +93,6 @@ myfs_mount(char *myfs_superblock)
   if (superblock->magic != MAGIC) {
     myfs_init();
   }
-  printf("%s %d  wp=%ld\n", __func__, __LINE__, superblock->block_wp);
 }
 
 int
@@ -103,8 +112,7 @@ myfs_open(const char *filename)
   }
   printf("%s not found. new fileid=%d for %s\n", __func__, empty_i, filename);
   strncpy(superblock->file[empty_i].name, filename, strlen(filename)+1);
-  superblock->file[empty_i].total_size = 0;
-  superblock->file[empty_i].tail_block = 0;
+  superblock->file[empty_i].n_block = 0;
   return empty_i;
 }
 
@@ -116,12 +124,17 @@ myfs_get_lba(int i, uint64_t offset, int write) {
   if (write > 0) {
     ABT_mutex_lock(superblock->file[i].abt_mutex);
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
-      superblock->file[i].block[i_block] = superblock->block_wp++;
-
-      if (i_block+1 > superblock->file[i].tail_block) {
-	superblock->file[i].tail_block = i_block+1;
-	//printf("file %d update tail_block %ld\n", i, i_block+1);
+      {
+	int old_val;
+	while (1) {
+	  old_val = superblock->free_blocks_rp;
+	  int new_val = old_val + 1;
+	  if (__sync_bool_compare_and_swap(&superblock->free_blocks_rp, old_val, new_val))
+	    break;
+	}
+	superblock->file[i].block[i_block] = superblock->free_blocks[old_val];
       }
+      superblock->file[i].n_block++;
     }
     ABT_mutex_unlock(superblock->file[i].abt_mutex);
   }
@@ -135,7 +148,7 @@ void
 myfs_close()
 {
   fsync(superblock_fd);
-  printf("%s %d  wp=%ld\n", __func__, __LINE__, superblock->block_wp);
+  printf("%s %d  used_blocks=%d\n", __func__, __LINE__, myfs_used_blocks());
 }
 
 void
