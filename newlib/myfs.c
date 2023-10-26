@@ -18,7 +18,7 @@
 
 #define MYFS_MAX_BLOCKS_PER_FILE (1024*256)
 #define MYFS_MAX_NAMELEN (1024)
-#define MYFS_MAX_FILES   (1024*16)
+#define MYFS_MAX_FILES   (768)
 
 typedef struct {
   char name[MYFS_MAX_NAMELEN];
@@ -86,7 +86,9 @@ myfs_mount(char *myfs_superblock)
     perror("open");
   }
   size_t page_size = getpagesize();
-  superblock = (superblock_t *)mmap(0, page_size*16384*2, PROT_READ|PROT_WRITE, MAP_SHARED, superblock_fd, 0);
+  uint64_t mapped_size = 1024ULL*1024*1024;
+  printf("sizeof(superblock_t)=%ld, mmapped_size=%ld\n", sizeof(superblock_t), mapped_size);
+  superblock = (superblock_t *)mmap(0, mapped_size, PROT_READ|PROT_WRITE, MAP_SHARED, superblock_fd, 0);
   if (superblock == MAP_FAILED)
     perror("mmap superblock file");
 
@@ -120,9 +122,10 @@ myfs_open(const char *filename)
 int64_t
 myfs_get_lba(int i, uint64_t offset, int write) {
   int i_block = offset / MYFS_BLOCK_SIZE;
-  //printf("%s %d offset=%ld write=%d block=%d tail=%d\n", __func__, i, offset, write, superblock->file[i].block[i_block], superblock->file[i].tail_block);
+  //printf("%s %d offset=%ld write=%d block=%d n_block=%d\n", __func__, i, offset, write, superblock->file[i].block[i_block], superblock->file[i].n_block);
   if (write > 0) {
     ABT_mutex_lock(superblock->file[i].abt_mutex);
+    //printf("a fd=%d, i_block %d, block=%d rp=%d wp=%d\n", i, i_block, superblock->file[i].block[i_block], superblock->free_blocks_rp, superblock->free_blocks_wp);
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
       {
 	int old_val;
