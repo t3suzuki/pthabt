@@ -93,7 +93,7 @@ static int is_hooked_filename(const char *filename)
   }
   if (hooked_rocksdb_dir) {
     const char sst_suffix[] = ".sst";
-    const int sst_filename_len = 6;
+    const int sst_filename_len = 7;
     ret |= ((strncmp(hooked_rocksdb_dir, filename, strlen(hooked_rocksdb_dir)) == 0) &&
 	    (strncmp(sst_suffix, filename + strlen(hooked_rocksdb_dir) + sst_filename_len, strlen(sst_suffix)) == 0));
   }
@@ -126,9 +126,8 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
   if ((pos % BLKSZ) + len <= BLKSZ) {
     blksz = len;
   }
-  //printf("%s %d %lu %lu\n", __func__, __LINE__, len, pos);
-  
   int j;
+#if 0
   for (j=0; j<len; j+=blksz) {
     int64_t lba = myfs_get_lba(hookfd, pos + j, 0);
     int rid = nvme_read_req(lba, blksz/512, tid, MIN(blksz, len - j), buf + j);
@@ -138,6 +137,28 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
       ABT_thread_yield();
     }
   }
+#else
+  int rid[256];
+  j = 0;
+  while (j<len) {
+    int rq_k;
+    int k;
+    for (rq_k=0; rq_k<256; rq_k++) {
+      if (j >= len)
+	break;
+      int64_t lba = myfs_get_lba(hookfd, pos + j, 0);
+      rid[rq_k] = nvme_read_req(lba, blksz/512, tid, MIN(blksz, len - j), buf + j);
+      j += blksz;
+    }
+    for (k=0; k<rq_k; k++) {
+      while (1) {
+	if (nvme_check(rid[k]))
+	  break;
+	ABT_thread_yield();
+      }
+    }
+  }
+#endif
 }
 
 void
@@ -148,6 +169,8 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
   int blksz = ((len % BLKSZ != 0) || (pos % BLKSZ != 0)) ? 512 : BLKSZ;
   
   int j;
+  //printf("%s %d %ld %ld %d\n", __func__, __LINE__, len, pos, blksz);
+#if 0
   for (j=0; j<len; j+=blksz) {
     int64_t lba = myfs_get_lba(hookfd, pos + j, 1);
     //printf("%s %d hookfd=%d len=%lu %lu pos =%lu\n", __func__, __LINE__, hookfd, len, j, pos);
@@ -158,6 +181,28 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
       ABT_thread_yield();
     }
   }
+#else
+  int rid[256];
+  j = 0;
+  while (j<len) {
+    int rq_k;
+    int k;
+    for (rq_k=0; rq_k<256; rq_k++) {
+      int64_t lba = myfs_get_lba(hookfd, pos + j, 1);
+      rid[rq_k] = nvme_write_req(lba, blksz/512, tid, MIN(blksz, len - j), buf + j);
+      j += blksz;
+      if (j >= len)
+	break;
+    }
+    for (k=0; k<rq_k; k++) {
+      while (1) {
+	if (nvme_check(rid[k]))
+	  break;
+	ABT_thread_yield();
+      }
+    }
+  }
+#endif
 }
 
 static inline int
