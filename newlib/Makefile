@@ -1,10 +1,10 @@
 
-N_TH ?= 1
+N_CORE ?= 1
 ND ?= 1
 
 FLAGS = -O3 -g
 FLAGS += -fpic
-FLAGS += -DN_TH=$(N_TH) -DND=$(ND)
+FLAGS += -DN_CORE=$(N_CORE) -DND=$(ND)
 FLAGS += -DUSE_PREEMPT=1
 #FLAGS += -DDEBUG=1
 
@@ -15,6 +15,11 @@ all:
 	g++ $(FLAGS) -c nvme.cc  -fno-exceptions -I $(ABT_PATH)/include
 	gcc $(FLAGS) -shared -o mylib.so mylib.c hook.c zpoline.c load_debug.c nvme.o myfs.c -I $(ABT_PATH)/include -L $(ABT_PATH)/lib -labt -lopcodes -lstdc++
 	gcc $(FLAGS) -shared -o debug.so debug.c
+
+pth:
+	g++ $(FLAGS) -DUSE_PTHPTH -c nvme.cc  -fno-exceptions
+	gcc $(FLAGS) -DUSE_PTHPTH -shared -o pthpth.so pthpth.c hook.c zpoline.c load_debug.c nvme.o myfs.c -lopcodes -lstdc++
+	gcc $(FLAGS) -DUSE_PTHPTH -shared -o debug.so debug.c
 
 patch:
 	./e9patch/e9compile.sh pref_yield.c

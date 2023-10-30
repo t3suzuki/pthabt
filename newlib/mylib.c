@@ -6,9 +6,9 @@
 #include "common.h"
 
 
-static ABT_xstream abt_xstreams[N_TH];
-static ABT_thread abt_threads[ULT_N_TH];
-static ABT_pool global_abt_pools[N_TH];
+static ABT_xstream abt_xstreams[N_CORE];
+static ABT_thread abt_threads[N_ULT];
+static ABT_pool global_abt_pools[N_CORE];
 static unsigned int global_my_tid = 0;
 #if USE_PREEMPT
 static ABT_preemption_group abt_preemption_group;
@@ -39,19 +39,20 @@ print_bt()
 
 int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
 		   void *(*start_routine) (void *), void *arg) {
-  int my_tid = global_my_tid++;
+  int my_tid = __sync_fetch_and_add(&my_tid, 1);
+  //int my_tid = global_my_tid++;
   ABT_thread *abt_thread = (ABT_thread *)malloc(sizeof(ABT_thread));
 #if USE_PREEMPT
   ABT_thread_attr abt_attr;
   ABT_thread_attr_create(&abt_attr);
   ABT_thread_attr_set_preemption_type(abt_attr, ABT_PREEMPTION_NEW_ES);
-  int ret = ABT_thread_create(global_abt_pools[my_tid % N_TH],
+  int ret = ABT_thread_create(global_abt_pools[my_tid % N_CORE],
 			      (void (*)(void*))start_routine,
 			      arg,
 			      abt_attr,
 			      abt_thread);
 #else
-  int ret = ABT_thread_create(global_abt_pools[my_tid % N_TH],
+  int ret = ABT_thread_create(global_abt_pools[my_tid % N_CORE],
 			      (void (*)(void*))start_routine,
 			      arg,
 			      ABT_THREAD_ATTR_NULL,
@@ -61,7 +62,7 @@ int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
 #if __PTHREAD_VERBOSE__
   unsigned long long abt_id;
   ABT_thread_get_id(*abt_thread, (ABT_unit_id *)&abt_id);
-  printf("%s %d ABT_id %llu @ core %d\n", __func__, __LINE__, abt_id, my_tid % N_TH);
+  printf("%s %d ABT_id %llu @ core %d\n", __func__, __LINE__, abt_id, my_tid % N_CORE);
   //print_bt();
 #endif
   *pth = (pthread_t)abt_thread;
@@ -376,8 +377,6 @@ int sched_yield() {
 #endif
 
 
-void __zpoline_init(void);
-
 void
 abt_init()
 {
@@ -385,7 +384,7 @@ abt_init()
   ABT_init(0, NULL);
 #if USE_PREEMPT
   printf(".so argobots with preempt!\n");
-  for (i=0; i<N_TH; i++) {
+  for (i=0; i<N_CORE; i++) {
     ABT_pool_create_basic(ABT_POOL_FIFO, ABT_POOL_ACCESS_MPMC, ABT_TRUE, &global_abt_pools[i]);
   }
 
@@ -394,24 +393,24 @@ abt_init()
   ABT_sched_create_basic(ABT_SCHED_BASIC, 1, &global_abt_pools[0], ABT_SCHED_CONFIG_NULL, &sched);
   ABT_xstream_set_main_sched(abt_xstreams[0], sched);
 
-  for (i=1; i<N_TH; i++) {
+  for (i=1; i<N_CORE; i++) {
     ABT_xstream_create_basic(ABT_SCHED_BASIC, 1, &global_abt_pools[i], ABT_SCHED_CONFIG_NULL, &abt_xstreams[i]);
     ABT_xstream_start(abt_xstreams[i]);
   }
-  for (i=0; i<N_TH; i++) {
+  for (i=0; i<N_CORE; i++) {
     ABT_xstream_set_cpubind(abt_xstreams[i], i);
   }
 
   ABT_preemption_timer_create_groups(1, &abt_preemption_group);
-  ABT_preemption_timer_set_xstreams(abt_preemption_group, N_TH, abt_xstreams);
+  ABT_preemption_timer_set_xstreams(abt_preemption_group, N_CORE, abt_xstreams);
   ABT_preemption_timer_start(abt_preemption_group);
 #else
   printf(".so argobots!\n");
   ABT_xstream_self(&abt_xstreams[0]);
-  for (i=1; i<N_TH; i++) {
+  for (i=1; i<N_CORE; i++) {
     ABT_xstream_create(ABT_SCHED_NULL, &abt_xstreams[i]);
   }
-  for (i=0; i<N_TH; i++) {
+  for (i=0; i<N_CORE; i++) {
     ABT_xstream_set_cpubind(abt_xstreams[i], i);
     ABT_xstream_get_main_pools(abt_xstreams[i], 1, &global_abt_pools[i]);
   }
@@ -419,6 +418,8 @@ abt_init()
   ABT_mutex_create(&abt_key_mutex);
 }
 
+
+void __zpoline_init(void);
 
 __attribute__((constructor(0xffff))) static void
 mylib_init()

@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
@@ -19,6 +20,7 @@
 #include "nvme.h"
 #include "myfs.h"
 #include "common.h"
+#include "ult.h"
 
 #define N_HELPER (32)
 
@@ -113,7 +115,7 @@ size_t cur_pos[MAX_HOOKFD];
 void
 read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 {
-  int tid = get_tid();
+  int core_id = ult_core_id();
 #if 0
   if (pos % 512 != 0) {
     printf("error len %lu pos %lu %lu\n", len, pos, cur_pos[hookfd]);
@@ -130,11 +132,11 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 #if 0
   for (j=0; j<len; j+=blksz) {
     int64_t lba = myfs_get_lba(hookfd, pos + j, 0);
-    int rid = nvme_read_req(lba, blksz/512, tid, MIN(blksz, len - j), buf + j);
+    int rid = nvme_read_req(lba, blksz/512, core_id, MIN(blksz, len - j), buf + j);
     while (1) {
       if (nvme_check(rid))
 	break;
-      ABT_thread_yield();
+      ult_yield();
     }
   }
 #else
@@ -147,14 +149,14 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
       if (j >= len)
 	break;
       int64_t lba = myfs_get_lba(hookfd, pos + j, 0);
-      rid[rq_k] = nvme_read_req(lba, blksz/512, tid, MIN(blksz, len - j), buf + j);
+      rid[rq_k] = nvme_read_req(lba, blksz/512, core_id, MIN(blksz, len - j), buf + j);
       j += blksz;
     }
     for (k=0; k<rq_k; k++) {
       while (1) {
 	if (nvme_check(rid[k]))
 	  break;
-	ABT_thread_yield();
+	ult_yield();
       }
     }
   }
@@ -164,7 +166,7 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 void
 write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 {
-  int tid = get_tid();
+  int core_id = ult_core_id();
   assert(pos % 512 == 0);
   int blksz = ((len % BLKSZ != 0) || (pos % BLKSZ != 0)) ? 512 : BLKSZ;
   
@@ -174,11 +176,11 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
   for (j=0; j<len; j+=blksz) {
     int64_t lba = myfs_get_lba(hookfd, pos + j, 1);
     //printf("%s %d hookfd=%d len=%lu %lu pos =%lu\n", __func__, __LINE__, hookfd, len, j, pos);
-    int rid = nvme_write_req(lba, blksz/512, tid, MIN(blksz, len - j), buf + j);
+    int rid = nvme_write_req(lba, blksz/512, core_id, MIN(blksz, len - j), buf + j);
     while (1) {
       if (nvme_check(rid))
 	break;
-      ABT_thread_yield();
+      ult_yield();
     }
   }
 #else
@@ -189,7 +191,7 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
     int k;
     for (rq_k=0; rq_k<256; rq_k++) {
       int64_t lba = myfs_get_lba(hookfd, pos + j, 1);
-      rid[rq_k] = nvme_write_req(lba, blksz/512, tid, MIN(blksz, len - j), buf + j);
+      rid[rq_k] = nvme_write_req(lba, blksz/512, core_id, MIN(blksz, len - j), buf + j);
       j += blksz;
       if (j >= len)
 	break;
@@ -198,7 +200,7 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
       while (1) {
 	if (nvme_check(rid[k]))
 	  break;
-	ABT_thread_yield();
+	ult_yield();
       }
     }
   }
@@ -248,7 +250,7 @@ hook_clock_nanosleep(clockid_t which_clock, int flags,
     double diff_nsec = (now.tv_sec - alarm.tv_sec) * 1e9 + (now.tv_nsec - alarm.tv_nsec);
     if (diff_nsec > 0)
       return 0;
-    ABT_thread_yield();
+    ult_yield();
   }
   return 0;
 }
@@ -265,9 +267,7 @@ long hook_function(long a1, long a2, long a3,
   }
   */
 
-  uint64_t abt_id;
-  int ret = ABT_thread_self_id(&abt_id);
-  if (ret == ABT_SUCCESS && (abt_id >= 0)) {
+  if (is_ult()) {
 
     /*
     if ((a1 != 1) && (a1 != 17) && (a1 != 18)) {
@@ -304,7 +304,7 @@ long hook_function(long a1, long a2, long a3,
 	    if (diff_nsec > 0)
 	      return 0;
 	  }
-	  ABT_thread_yield();
+	  ult_yield();
 	}
       }
     case SYS_openat:
@@ -340,7 +340,7 @@ long hook_function(long a1, long a2, long a3,
 	  if (ret) {
 	    return ret;
 	  }
-	  ABT_thread_yield();
+	  ult_yield();
 	}
       }
     case SYS_read:
@@ -385,7 +385,7 @@ long hook_function(long a1, long a2, long a3,
 	}
       }
     case 186: // gettid
-      return abt_id;
+      return ult_id();
     case 18: // pwrite64
       {
 	int hookfd = hookfds[a2];
@@ -432,7 +432,7 @@ long hook_function(long a1, long a2, long a3,
 	while (1) {
 	  if (nvme_check(rid))
 	    break;
-	  ABT_thread_yield();
+	  ult_yield();
 	}
 	//printf("%s %d completed%d\n", __func__, __LINE__, completed);
 	events[completed].data = cur_aios[cur_aio_rp]->aio_buf;
@@ -455,7 +455,7 @@ long hook_function(long a1, long a2, long a3,
       //printf("completed %d\n", completed);
       return completed;
     case 209: // io_submit
-      int tid = get_tid();
+      int core_id = ult_core_id();
       struct iocb **ios = (struct iocb **)a4;
       int n_io = a3;
       int i;
@@ -475,21 +475,21 @@ long hook_function(long a1, long a2, long a3,
 	
 	if (op == IOCB_CMD_PREAD) {
 	  int64_t lba = myfs_get_lba(hookfds[fd], pos, 0);
-	  int rid = nvme_read_req(lba, blksz/512, tid, MIN(blksz, len), buf);
+	  int rid = nvme_read_req(lba, blksz/512, core_id, MIN(blksz, len), buf);
 	  //printf("io_submit read op=%d fd=%d, sz=%ld, pos=%ld lba=%d rid=%d\n", op, fd, len, pos, lba, rid);
 	  ios[i]->aio_reserved2 = rid;
 #if 0
 	  while (1) {
 	    if (nvme_check(rid))
 	      break;
-	    ABT_thread_yield();
+	    ult_yield();
 	  }
 	  ios[i]->aio_reserved2 = JUST_ALLOCATED;
 #endif
 	}
 	if (op == IOCB_CMD_PWRITE) {
 	  int64_t lba = myfs_get_lba(hookfds[fd], pos, 1);
-	  int rid = nvme_write_req(lba, blksz/512, tid, MIN(blksz, len), buf);
+	  int rid = nvme_write_req(lba, blksz/512, core_id, MIN(blksz, len), buf);
 	  //printf("io_submit write op=%d fd=%d, sz=%ld, pos=%ld lba=%d rid=%d\n", op, fd, len, pos, lba, rid);
 	  ios[i]->aio_reserved2 = rid;
 #if 0
@@ -497,7 +497,7 @@ long hook_function(long a1, long a2, long a3,
 	  while (1) {
 	    if (nvme_check(rid))
 	      break;
-	    ABT_thread_yield();
+	    ult_yield();
 	  }
 	  ios[i]->aio_reserved2 = JUST_ALLOCATED;
 	  //debug_item(115, ios[i]->aio_data);
@@ -527,7 +527,7 @@ long hook_function(long a1, long a2, long a3,
       while (1) {
 	if (helpers[abt_id].done)
 	  break;
-	ABT_thread_yield();
+	ult_yield();
 	//uint64_t pre_id;
 	//int ret = ABT_self_get_pre_id(&pre_id);
       }

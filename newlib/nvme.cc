@@ -12,6 +12,7 @@
 #include <vector>
 #include <string>
 #include "common.h"
+#include "ult.h"
 #include <time.h>
 #include <zlib.h>
 
@@ -21,8 +22,8 @@ extern "C" {
 #include "nvme.h"
   
   //#define ND (1)
-#define NQ (N_TH)
-#define QD (N_ULT*2)
+#define NQ (N_CORE+1)
+#define QD (N_ULT_PER_CORE*2)
 #define AQD (8)
 
 #define RAID_FACTOR (4096 / 512)
@@ -121,7 +122,7 @@ public:
   int n_cqe;
   const int sq_offset = 0x4000;
 #if USE_PREEMPT
-  ABT_mutex mutex;
+  ult_mutex mutex;
 #endif
 private:
   int sq_tail;
@@ -178,17 +179,17 @@ public:
     }
     doorbell = &regs32[0x1000 / sizeof(uint32_t) + 2 * qid];
 #if USE_PREEMPT
-    ABT_mutex_create(&mutex);
+    ult_mutex_create(&mutex);
 #endif
   }
   inline void lock() {
 #if USE_PREEMPT
-    ABT_mutex_lock(mutex);
+    ult_mutex_lock(mutex);
 #endif
   }
   inline void unlock() {
 #if USE_PREEMPT
-    ABT_mutex_unlock(mutex);
+    ult_mutex_unlock(mutex);
 #endif
   }
   uint64_t cq_pa() {
@@ -323,7 +324,7 @@ public:
 };
 
 
-static QP *qps[ND][NQ+1]; // +1 is for admin queue.
+static QP *qps[ND][NQ]; // +1 is for admin queue.
 
 
 static void
@@ -433,7 +434,7 @@ __nvme_init(int did, char *pci_addr)
 
   {
     int iq;
-    for (iq=1; iq<=NQ; iq++) {
+    for (iq=1; iq<NQ; iq++) {
       qps[did][iq] = new QP(iq, regs32);
       create_qp(did, iq);
       //printf("%p %lx %p %lx\n", qps[iq]->get_cqe(0), qps[iq]->cq_pa(), qps[iq]->get_sqe(0), qps[iq]->sq_pa());
@@ -470,11 +471,11 @@ nvme_init()
 }
 
 int
-nvme_read_req(int64_t lba, int num_blk, int tid, int len, char *buf)
+nvme_read_req(int64_t lba, int num_blk, int core_id, int len, char *buf)
 {
   int cid;
-  int qid = tid + 1;
   int did = (lba / RAID_FACTOR) % ND;
+  int qid = core_id + 1;
 
   QP *qp = qps[did][qid];
 
@@ -497,16 +498,15 @@ nvme_read_req(int64_t lba, int num_blk, int tid, int len, char *buf)
   qp->sq_doorbell();
   qp->unlock();
   
-  int rid = did*QD*NQ + tid*QD + cid;
-  //printf("%s rid = %d lba = %d did=%d,tid=%d,cid=%d,buf=%p,len=%d\n", __func__, rid, lba, did, tid, cid, buf, len);
+  int rid = did*QD*N_CORE + core_id*QD + cid;
   return rid;
 }
 
 int
 nvme_check(int rid)
 {
-  int did = rid / QD / NQ;
-  int qid = (rid / QD) % NQ + 1;
+  int did = rid / QD / N_CORE;
+  int qid = (rid / QD) % N_CORE + 1;
   int cid = rid % QD;
   //printf("%s %d rid=%d did=%d qid=%d\n", __func__, __LINE__, rid, did, qid);
   QP *qp = qps[did][qid];
@@ -523,11 +523,11 @@ nvme_check(int rid)
 }
 
 int
-nvme_write_req(int64_t lba, int num_blk, int tid, int len, char *buf)
+nvme_write_req(int64_t lba, int num_blk, int core_id, int len, char *buf)
 {
-  int qid = tid + 1;
   int cid;
   int did = (lba / RAID_FACTOR) % ND;
+  int qid = core_id + 1;
   QP *qp = qps[did][qid];
 
 
@@ -544,7 +544,7 @@ nvme_write_req(int64_t lba, int num_blk, int tid, int len, char *buf)
   qp->sq_doorbell();
   qp->unlock();
   
-  int rid = did*QD*NQ + tid*QD + cid;
+  int rid = did*QD*N_CORE + core_id*QD + cid;
 
   /*
   int o = 0;

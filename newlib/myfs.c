@@ -12,6 +12,7 @@
 #include <assert.h>
 #include "nvme.h"
 #include "common.h"
+#include "ult.h"
 
 #define MYFS_BLOCK_SIZE (2*1024*1024)
 #define NUM_BLOCKS (4*1024*1024)
@@ -24,7 +25,7 @@ typedef struct {
   char name[MYFS_MAX_NAMELEN];
   int32_t block[MYFS_MAX_BLOCKS_PER_FILE];
   uint64_t n_block;
-  ABT_mutex abt_mutex;
+  ult_mutex mutex;
 } file_t;
 
 typedef struct {
@@ -124,7 +125,7 @@ myfs_get_lba(int i, uint64_t offset, int write) {
   int i_block = offset / MYFS_BLOCK_SIZE;
   //printf("%s %d offset=%ld write=%d block=%d n_block=%d\n", __func__, i, offset, write, superblock->file[i].block[i_block], superblock->file[i].n_block);
   if (write > 0) {
-    ABT_mutex_lock(superblock->file[i].abt_mutex);
+    ult_mutex_lock(superblock->file[i].mutex);
     //printf("a fd=%d, i_block %d, block=%d rp=%d wp=%d\n", i, i_block, superblock->file[i].block[i_block], superblock->free_blocks_rp, superblock->free_blocks_wp);
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
       {
@@ -139,7 +140,7 @@ myfs_get_lba(int i, uint64_t offset, int write) {
       }
       superblock->file[i].n_block++;
     }
-    ABT_mutex_unlock(superblock->file[i].abt_mutex);
+    ult_mutex_unlock(superblock->file[i].mutex);
   }
   //printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
   assert(superblock->file[i].block[i_block] != INACTIVE_BLOCK);
