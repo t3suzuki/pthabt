@@ -41,11 +41,23 @@ int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
 		   void *(*start_routine) (void *), void *arg) {
   int my_tid = global_my_tid++;
   ABT_thread *abt_thread = (ABT_thread *)malloc(sizeof(ABT_thread));
+#if USE_PREEMPT
+  ABT_thread_attr abt_attr;
+  ABT_thread_attr_create(&abt_attr);
+  ABT_thread_attr_set_preemption_type(abt_attr, ABT_PREEMPTION_NEW_ES);
+  int ret = ABT_thread_create(global_abt_pools[my_tid % N_TH],
+			      (void (*)(void*))start_routine,
+			      arg,
+			      abt_attr,
+			      abt_thread);
+#else
   int ret = ABT_thread_create(global_abt_pools[my_tid % N_TH],
 			      (void (*)(void*))start_routine,
 			      arg,
 			      ABT_THREAD_ATTR_NULL,
 			      abt_thread);
+#endif
+  
 #if __PTHREAD_VERBOSE__
   unsigned long long abt_id;
   ABT_thread_get_id(*abt_thread, (ABT_unit_id *)&abt_id);

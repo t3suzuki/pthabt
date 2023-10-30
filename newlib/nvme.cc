@@ -120,7 +120,9 @@ public:
   int n_sqe;
   int n_cqe;
   const int sq_offset = 0x4000;
+#if USE_PREEMPT
   ABT_mutex mutex;
+#endif
 private:
   int sq_tail;
   //int sq_head;
@@ -175,13 +177,19 @@ public:
       sqe->CDW0.CID = i;
     }
     doorbell = &regs32[0x1000 / sizeof(uint32_t) + 2 * qid];
+#if USE_PREEMPT
     ABT_mutex_create(&mutex);
+#endif
   }
   inline void lock() {
+#if USE_PREEMPT
     ABT_mutex_lock(mutex);
+#endif
   }
   inline void unlock() {
+#if USE_PREEMPT
     ABT_mutex_unlock(mutex);
+#endif
   }
   uint64_t cq_pa() {
     return v2p((size_t)sqcq);
