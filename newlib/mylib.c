@@ -39,7 +39,7 @@ print_bt()
 
 int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
 		   void *(*start_routine) (void *), void *arg) {
-  int my_tid = __sync_fetch_and_add(&my_tid, 1);
+  int my_tid = __sync_fetch_and_add(&global_my_tid, 1);
   //int my_tid = global_my_tid++;
   ABT_thread *abt_thread = (ABT_thread *)malloc(sizeof(ABT_thread));
 #if USE_PREEMPT
