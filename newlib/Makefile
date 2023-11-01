@@ -1,11 +1,12 @@
 
 N_CORE ?= 1
 ND ?= 1
+USE_PREEMPT ?= 1
 
 FLAGS = -O3 -g
 FLAGS += -fpic
 FLAGS += -DN_CORE=$(N_CORE) -DND=$(ND)
-FLAGS += -DUSE_PREEMPT=1
+FLAGS += -DUSE_PREEMPT=$(USE_PREEMPT)
 #FLAGS += -DDEBUG=1
 
 #ABT_PATH ?= $(HOME)/argobots/install
@@ -17,9 +18,9 @@ all:
 	gcc $(FLAGS) -shared -o debug.so debug.c
 
 pth:
-	g++ $(FLAGS) -DUSE_PTHPTH -c nvme.cc  -fno-exceptions
-	gcc $(FLAGS) -DUSE_PTHPTH -shared -o pthpth.so pthpth.c hook.c zpoline.c load_debug.c nvme.o myfs.c -lopcodes -lstdc++
-	gcc $(FLAGS) -DUSE_PTHPTH -shared -o debug.so debug.c
+	g++ $(FLAGS) -DUSE_PTHPTH=1 -c nvme.cc  -fno-exceptions
+	gcc $(FLAGS) -DUSE_PTHPTH=1 -shared -o pthpth.so pthpth.c hook.c zpoline.c load_debug.c nvme.o myfs.c -I $(ABT_PATH)/include -lopcodes -lstdc++ 
+	gcc $(FLAGS) -DUSE_PTHPTH=1 -shared -o debug.so debug.c
 
 patch:
 	./e9patch/e9compile.sh pref_yield.c

@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <immintrin.h>
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -14,6 +15,7 @@
 #include <assert.h>
 #include <time.h>
 #include <linux/aio_abi.h>
+#include <linux/futex.h>
 #include <sys/syscall.h>
 
 #include "real_pthread.h"
@@ -102,7 +104,6 @@ static int is_hooked_filename(const char *filename)
   return ret;
 }
 
-
 static struct iocb *cur_aios[1024];
 static int cur_aio_wp;
 static int cur_aio_rp;
@@ -116,6 +117,7 @@ void
 read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 {
   int core_id = ult_core_id();
+  //printf("%s fd=%d len=%d core=%d\n", __func__, hookfd, len, core_id);
 #if 0
   if (pos % 512 != 0) {
     printf("error len %lu pos %lu %lu\n", len, pos, cur_pos[hookfd]);
@@ -255,6 +257,7 @@ hook_clock_nanosleep(clockid_t which_clock, int flags,
   return 0;
 }
 
+extern int mylib_initialized;
 
 long hook_function(long a1, long a2, long a3,
 		   long a4, long a5, long a6,
@@ -266,7 +269,12 @@ long hook_function(long a1, long a2, long a3,
     debug_print(1, a1, 9999);
   }
   */
-
+  /*
+  if ((a1 != 1) && (a1 != 202) && (a1 != 24) && (a1 != 12)) {
+    printf("call %ld\n", a1);
+  }
+  */
+  
   if (is_ult()) {
 
     /*
@@ -274,11 +282,11 @@ long hook_function(long a1, long a2, long a3,
       printf("call %ld %ld\n", a1, abt_id);
     }
     */
-    /*
+
     if (debug_print) {
-      debug_print(1, a1, abt_id);
+      debug_print(1, a1, 0);
     }
-    */
+    
     switch (a1) {
     case 230: // nanosleep
       return hook_clock_nanosleep(a2, a3, (struct timespec *)a4, (struct timespec *)a5);
@@ -384,8 +392,6 @@ long hook_function(long a1, long a2, long a3,
 	  return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
 	}
       }
-    case 186: // gettid
-      return ult_id();
     case 18: // pwrite64
       {
 	int hookfd = hookfds[a2];
@@ -400,6 +406,25 @@ long hook_function(long a1, long a2, long a3,
 	} else {
 	  return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
 	}
+      }
+    case 202: // futex
+      uint32_t *uaddr = (uint32_t *)a2;
+      int op = a3;
+      uint32_t val = a4;
+      struct __kernel_timespec *utime = (struct __kernel_timespec *)a5;
+
+      
+      if (mylib_initialized &&
+	  (a6 != 0xdeadcafe) &&
+	  (utime == NULL) &&
+	  ((op == FUTEX_WAIT) || (op == (FUTEX_WAIT | FUTEX_PRIVATE_FLAG)))) {
+	while (*uaddr == val) {
+	  //printf("%s %d %d %d\n", __func__, __LINE__, op, mylib_initialized);
+	  ult_yield();
+	}
+	return 0;
+      } else {
+	return next_sys_call(a1, a2, op, a4, a5, a6, a7);
       }
     case 262: // fstat
       if (((int32_t)a2 >= 0) && (hookfds[a2] >= 0)) {
@@ -535,6 +560,15 @@ long hook_function(long a1, long a2, long a3,
       */
     }
   } else {
+#if 0
+    if (a1 == 202) {
+      int op = a3;
+      if (op & 1024) {
+	op ^= 1024;
+      }
+      return next_sys_call(202, a2, op, a4, a5, a6, a7);
+    }
+#endif
     /*
     if ((a1 == 1) || (a1 == 18)) {
       printf("outside write %ld %ld\n", a1, a2);
@@ -576,7 +610,7 @@ int __hook_init(long placeholder __attribute__((unused)),
 
 
   nvme_init();
-  
+
   return 0;
 
 }

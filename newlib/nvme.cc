@@ -184,12 +184,12 @@ public:
   }
   inline void lock() {
 #if USE_PREEMPT
-    ult_mutex_lock(mutex);
+    ult_mutex_lock(&mutex);
 #endif
   }
   inline void unlock() {
 #if USE_PREEMPT
-    ult_mutex_unlock(mutex);
+    ult_mutex_unlock(&mutex);
 #endif
   }
   uint64_t cq_pa() {

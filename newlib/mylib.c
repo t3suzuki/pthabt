@@ -421,12 +421,18 @@ abt_init()
 
 void __zpoline_init(void);
 
+
+int mylib_initialized = 0;
+
 __attribute__((constructor(0xffff))) static void
 mylib_init()
 {
   __zpoline_init();
 
   abt_init();
+
+  mylib_initialized = 1;
 }
+
 
 
