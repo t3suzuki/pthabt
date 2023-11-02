@@ -461,10 +461,10 @@ nvme_init()
     __nvme_init(j++, pci_addr);
     if (j == ND)
       break;
-    while (s[i] != ' ' && s[i] != '\0') {
+    while (s[i] != '_' && s[i] != '\0') {
       i++;
     }
-    while (s[i] == ' ' && s[i] != '\0') {
+    while (s[i] == '_' && s[i] != '\0') {
       i++;
     }
   }

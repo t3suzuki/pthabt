@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <errno.h>
 #include <immintrin.h>
 
 #include <stdlib.h>
@@ -233,6 +234,33 @@ hook_openat(long a1, long a2, long a3,
   return ret;
 }
 
+int
+hook_futex(long a1, long a2, long a3,
+	   long a4, long a5, long a6,
+	   long a7)
+{
+  {
+    int op = a3;
+    if (((op == FUTEX_WAIT) || (op == (FUTEX_WAIT | FUTEX_PRIVATE_FLAG))) &&
+	!ABT_thread_is_sched()) {
+      int ret;
+      struct timespec ztime;
+      ztime.tv_sec = 0;
+      ztime.tv_nsec = 100;
+      while (1) {
+	ret =  next_sys_call(a1, a2, a3, a4, &ztime, a6, a7);
+	if (ret == -ETIMEDOUT) {
+	  ult_yield();
+	} else {
+	  return ret;
+	}
+      }
+    } else {
+      return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+    }
+  }
+}
+
 static inline int
 hook_clock_nanosleep(clockid_t which_clock, int flags,
 		     const struct timespec *req,
@@ -407,25 +435,10 @@ long hook_function(long a1, long a2, long a3,
 	  return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
 	}
       }
+#if 1
     case 202: // futex
-      uint32_t *uaddr = (uint32_t *)a2;
-      int op = a3;
-      uint32_t val = a4;
-      struct __kernel_timespec *utime = (struct __kernel_timespec *)a5;
-
-      
-      if (mylib_initialized &&
-	  (a6 != 0xdeadcafe) &&
-	  (utime == NULL) &&
-	  ((op == FUTEX_WAIT) || (op == (FUTEX_WAIT | FUTEX_PRIVATE_FLAG)))) {
-	while (*uaddr == val) {
-	  //printf("%s %d %d %d\n", __func__, __LINE__, op, mylib_initialized);
-	  ult_yield();
-	}
-	return 0;
-      } else {
-	return next_sys_call(a1, a2, op, a4, a5, a6, a7);
-      }
+      return hook_futex(a1, a2, a3, a4, a5, a6, a7);
+#endif
     case 262: // fstat
       if (((int32_t)a2 >= 0) && (hookfds[a2] >= 0)) {
 	uint64_t sz = myfs_get_size(hookfds[a2]);
