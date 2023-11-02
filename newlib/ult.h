@@ -1,7 +1,6 @@
 #ifndef __ULT_H__
 #define __ULT_H__
 
-
 #if USE_PTHPTH
 
 #define _GNU_SOURCE
@@ -15,6 +14,7 @@ typedef pthread_mutex_t ult_mutex;
 #define ult_yield() sched_yield()
 #define is_ult() (1)
 #define ult_id() (gettid())
+#define ult_is_cswitchable() (1)
 
 static inline int ult_core_id()
 {
@@ -28,6 +28,7 @@ typedef ABT_mutex ult_mutex;
 #define ult_mutex_lock(x)   ABT_mutex_lock(*x)
 #define ult_mutex_unlock(x) ABT_mutex_unlock(*x)
 #define ult_yield() ABT_thread_yield()
+#define ult_is_cswitchable() !ABT_thread_is_sched()
 
 static inline int is_ult()
 {

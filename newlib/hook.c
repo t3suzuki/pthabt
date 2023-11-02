@@ -243,7 +243,7 @@ hook_futex(long a1, long a2, long a3,
     int op = a3;
     if (((op == FUTEX_WAIT) || (op == (FUTEX_WAIT | FUTEX_PRIVATE_FLAG))) &&
 	(a5 == 0) &&
-	!ABT_thread_is_sched()) {
+	ult_is_cswitchable()) {
       int ret;
       const struct timespec ztime = {.tv_sec = 0, .tv_nsec = 1};
       while (1) {
@@ -253,21 +253,6 @@ hook_futex(long a1, long a2, long a3,
 	ult_yield();
       }
       return ret;
-    } else {
-      return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-    }
-  } else {
-    uint32_t *uaddr = (uint32_t *)a2;
-    int op = a3;
-    uint32_t val = (uint32_t)a4;
-    if (((op == FUTEX_WAIT) || (op == (FUTEX_WAIT | FUTEX_PRIVATE_FLAG))) &&
-	!ABT_thread_is_sched()) {
-      while (1) {
-	if (*uaddr == val)
-	  break;
-	ult_yield();
-      }
-      return 0;
     } else {
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     }
@@ -448,7 +433,7 @@ long hook_function(long a1, long a2, long a3,
 	  return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
 	}
       }
-#if 1
+#if 0
     case 202: // futex
       return hook_futex(a1, a2, a3, a4, a5, a6, a7);
 #endif

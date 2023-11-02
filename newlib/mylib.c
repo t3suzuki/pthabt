@@ -427,6 +427,9 @@ int mylib_initialized = 0;
 __attribute__((constructor(0xffff))) static void
 mylib_init()
 {
+
+  printf("Using %d cores.\n", N_CORE);
+  
   __zpoline_init();
 
   abt_init();
