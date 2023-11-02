@@ -234,27 +234,40 @@ hook_openat(long a1, long a2, long a3,
   return ret;
 }
 
-int
+static inline int
 hook_futex(long a1, long a2, long a3,
 	   long a4, long a5, long a6,
 	   long a7)
 {
-  {
+  if (1) {
     int op = a3;
     if (((op == FUTEX_WAIT) || (op == (FUTEX_WAIT | FUTEX_PRIVATE_FLAG))) &&
+	(a5 == 0) &&
 	!ABT_thread_is_sched()) {
       int ret;
-      struct timespec ztime;
-      ztime.tv_sec = 0;
-      ztime.tv_nsec = 100;
+      const struct timespec ztime = {.tv_sec = 0, .tv_nsec = 1};
       while (1) {
-	ret =  next_sys_call(a1, a2, a3, a4, &ztime, a6, a7);
-	if (ret == -ETIMEDOUT) {
-	  ult_yield();
-	} else {
-	  return ret;
-	}
+	ret =  next_sys_call(a1, a2, a3, a4, (long)&ztime, a6, a7);
+	if (ret != -ETIMEDOUT)
+	  break;
+	ult_yield();
       }
+      return ret;
+    } else {
+      return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+    }
+  } else {
+    uint32_t *uaddr = (uint32_t *)a2;
+    int op = a3;
+    uint32_t val = (uint32_t)a4;
+    if (((op == FUTEX_WAIT) || (op == (FUTEX_WAIT | FUTEX_PRIVATE_FLAG))) &&
+	!ABT_thread_is_sched()) {
+      while (1) {
+	if (*uaddr == val)
+	  break;
+	ult_yield();
+      }
+      return 0;
     } else {
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
     }
