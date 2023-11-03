@@ -245,10 +245,14 @@ hook_futex(long a1, long a2, long a3,
 	(a5 == 0) &&
 	ult_is_cswitchable()) {
       int ret;
-      const struct timespec ztime = {.tv_sec = 0, .tv_nsec = 1};
+      const struct timespec ztime = {.tv_sec = 0, .tv_nsec = 100};
       while (1) {
+	/*
 	ret =  next_sys_call(a1, a2, a3, a4, (long)&ztime, a6, a7);
 	if (ret != -ETIMEDOUT)
+	  break;
+	*/
+	if (*(uint32_t *)a2 != (uint32_t)a4)
 	  break;
 	ult_yield();
       }
@@ -314,33 +318,6 @@ long hook_function(long a1, long a2, long a3,
     }
     
     switch (a1) {
-    case 230: // nanosleep
-      return hook_clock_nanosleep(a2, a3, (struct timespec *)a4, (struct timespec *)a5);
-    case 441: // epoll_pwait2
-      {
-	struct timespec tsz = {.tv_sec = 0, .tv_nsec = 0};
-	struct timespec *ts = (struct timespec *) a5;
-	if (ts) {
-	  struct timespec tsc;
-	  clock_gettime(CLOCK_MONOTONIC_COARSE, &tsc);
-	  ts->tv_sec += tsc.tv_sec;
-	  ts->tv_nsec += tsc.tv_nsec;
-	}
-	while (1) {
-	  int ret = next_sys_call(a1, a2, a3, a4, (long)&tsz, a6, a7);
-	  if (ret > 0) {
-	    return ret;
-	  }
-	  if (ts) {
-	    struct timespec ts2;
-	    clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
-	    double diff_nsec = (ts2.tv_sec - ts->tv_sec) * 1e9 + (ts2.tv_nsec - ts->tv_nsec);
-	    if (diff_nsec > 0)
-	      return 0;
-	  }
-	  ult_yield();
-	}
-      }
     case SYS_openat:
       return hook_openat(a1, a2, a3, a4, a5, a6, a7);
     case SYS_close:
@@ -352,30 +329,6 @@ long hook_function(long a1, long a2, long a3,
 	  hookfds[fd] = NOT_USED_FD;
 	}
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
-      }
-    case 270: // select
-      {
-	struct timespec *ats = (struct timespec *) a6;
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
-	ts.tv_sec += ats->tv_sec;
-	ts.tv_nsec += ats->tv_nsec;
-	int ret;
-	while (1) {
-	  struct timespec zts = {.tv_sec = 0, .tv_nsec = 0};
-	  if (a6) {
-	    struct timespec ts2;
-	    clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
-	    double diff_nsec = (ts2.tv_sec - ts.tv_sec) * 1e9 + (ts2.tv_nsec - ts.tv_nsec);
-	    if (diff_nsec > 0)
-	      return 0;
-	  }
-	  ret = next_sys_call(a1, a2, a3, a4, a5, (long)&zts, a7);
-	  if (ret) {
-	    return ret;
-	  }
-	  ult_yield();
-	}
       }
     case SYS_read:
       {
@@ -433,10 +386,6 @@ long hook_function(long a1, long a2, long a3,
 	  return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
 	}
       }
-#if 0
-    case 202: // futex
-      return hook_futex(a1, a2, a3, a4, a5, a6, a7);
-#endif
     case 262: // fstat
       if (((int32_t)a2 >= 0) && (hookfds[a2] >= 0)) {
 	uint64_t sz = myfs_get_size(hookfds[a2]);
@@ -449,6 +398,63 @@ long hook_function(long a1, long a2, long a3,
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
+    case 230: // nanosleep
+      return hook_clock_nanosleep(a2, a3, (struct timespec *)a4, (struct timespec *)a5);
+    case 270: // select
+      {
+	struct timespec *ats = (struct timespec *) a6;
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+	ts.tv_sec += ats->tv_sec;
+	ts.tv_nsec += ats->tv_nsec;
+	int ret;
+	while (1) {
+	  struct timespec zts = {.tv_sec = 0, .tv_nsec = 0};
+	  if (a6) {
+	    struct timespec ts2;
+	    clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
+	    double diff_nsec = (ts2.tv_sec - ts.tv_sec) * 1e9 + (ts2.tv_nsec - ts.tv_nsec);
+	    if (diff_nsec > 0)
+	      return 0;
+	  }
+	  ret = next_sys_call(a1, a2, a3, a4, a5, (long)&zts, a7);
+	  if (ret) {
+	    return ret;
+	  }
+	  ult_yield();
+	}
+      }
+    case 441: // epoll_pwait2
+      {
+	struct timespec tsz = {.tv_sec = 0, .tv_nsec = 0};
+	struct timespec *ts = (struct timespec *) a5;
+	if (ts) {
+	  struct timespec tsc;
+	  clock_gettime(CLOCK_MONOTONIC_COARSE, &tsc);
+	  ts->tv_sec += tsc.tv_sec;
+	  ts->tv_nsec += tsc.tv_nsec;
+	}
+	while (1) {
+	  int ret = next_sys_call(a1, a2, a3, a4, (long)&tsz, a6, a7);
+	  if (ret > 0) {
+	    return ret;
+	  }
+	  if (ts) {
+	    struct timespec ts2;
+	    clock_gettime(CLOCK_MONOTONIC_COARSE, &ts2);
+	    double diff_nsec = (ts2.tv_sec - ts->tv_sec) * 1e9 + (ts2.tv_nsec - ts->tv_nsec);
+	    if (diff_nsec > 0)
+	      return 0;
+	  }
+	  ult_yield();
+	}
+      }
+#if 0
+    case 202: // futex
+      return hook_futex(a1, a2, a3, a4, a5, a6, a7);
+#endif // futex
+
+#if 0 // AIO
     case 208: // io_getevents
       int min_nr = a3;
       int nr = a4;
@@ -556,6 +562,7 @@ long hook_function(long a1, long a2, long a3,
     case 207: // io_destroy
       printf("io_destroy %ld %p\n", a2, (void *)a3);
       return 0;
+#endif // AIO
     default:
       return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       /*
