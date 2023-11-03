@@ -363,6 +363,11 @@ pthread_t pthread_self(void)
 }
 #endif
 
+void yield_inifinite_loop(void)
+{
+  ABT_thread_yield();
+}
+
 #if 1
 int sched_yield() {
   if (0) {
