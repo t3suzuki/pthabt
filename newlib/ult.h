@@ -30,6 +30,15 @@ typedef ABT_mutex ult_mutex;
 #define ult_yield() ABT_thread_yield()
 #define ult_is_cswitchable() !ABT_thread_is_sched()
 
+/*
+extern int mylib_initialized;
+static inline void ult_yield()
+{
+  if (mylib_initialized)
+    ABT_thread_yield();
+}
+*/
+
 static inline int is_ult()
 {
   uint64_t abt_id;
