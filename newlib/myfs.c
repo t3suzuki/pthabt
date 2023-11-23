@@ -26,11 +26,12 @@ typedef struct {
   char name[MYFS_MAX_NAMELEN];
   int32_t block[MYFS_MAX_BLOCKS_PER_FILE];
   uint64_t n_block;
-  union u {
-    ABT_mutex abt;
-    pthread_mutex_t pth;
-  } mutex;
 } file_t;
+
+union u {
+  ABT_mutex abt;
+  pthread_mutex_t pth;
+} myfs_file_mutex[MYFS_MAX_FILES];
 
 typedef struct {
   uint64_t magic;
@@ -56,6 +57,7 @@ myfs_init()
     for (j=0; j<MYFS_MAX_BLOCKS_PER_FILE; j++) {
       superblock->file[i].block[j] = INACTIVE_BLOCK;
     }
+    ult_mutex_create(&myfs_file_mutex[i]);
   }
   for (i=0; i<NUM_BLOCKS-1; i++) {
     superblock->free_blocks[i] = i;
@@ -63,6 +65,7 @@ myfs_init()
   superblock->free_blocks_rp = 0;
   superblock->free_blocks_wp = NUM_BLOCKS - 1;
   superblock->magic = MAGIC;
+
 }
 
 uint64_t
@@ -117,7 +120,7 @@ myfs_open(const char *filename)
       empty_i = i;
     }
   }
-  printf("%s not found. new fileid=%d for %s\n", __func__, empty_i, filename);
+  printf("%s file not found. new fileid=%d for %s\n", __func__, empty_i, filename);
   strncpy(superblock->file[empty_i].name, filename, strlen(filename)+1);
   superblock->file[empty_i].n_block = 0;
   return empty_i;
@@ -129,7 +132,7 @@ myfs_get_lba(int i, uint64_t offset, int write) {
   int i_block = offset / MYFS_BLOCK_SIZE;
   //printf("%s %d offset=%ld write=%d block=%d n_block=%d\n", __func__, i, offset, write, superblock->file[i].block[i_block], superblock->file[i].n_block);
   if (write > 0) {
-    ult_mutex_lock((ult_mutex *)&superblock->file[i].mutex);
+    ult_mutex_lock((ult_mutex *)&myfs_file_mutex[i]);
     //printf("a fd=%d, i_block %d, block=%d rp=%d wp=%d\n", i, i_block, superblock->file[i].block[i_block], superblock->free_blocks_rp, superblock->free_blocks_wp);
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
       {
@@ -144,7 +147,7 @@ myfs_get_lba(int i, uint64_t offset, int write) {
       }
       superblock->file[i].n_block++;
     }
-    ult_mutex_unlock((ult_mutex*)&superblock->file[i].mutex);
+    ult_mutex_unlock((ult_mutex*)&myfs_file_mutex[i]);
   }
   //printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
   assert(superblock->file[i].block[i_block] != INACTIVE_BLOCK);
