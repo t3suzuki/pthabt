@@ -239,7 +239,19 @@ hook_futex(long a1, long a2, long a3,
 	   long a4, long a5, long a6,
 	   long a7)
 {
-  return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+  uint32_t *uaddr = (uint32_t *)a2;
+  int futex_op = a3;
+  uint32_t val = (uint32_t)a4;
+  //if ((futex_op & FUTEX_WAIT) && (a6 != 0xdeadcafe)) {
+  if ((a6 != 0xdeadcafe) && ((futex_op == FUTEX_WAIT) || (futex_op == (FUTEX_WAIT | FUTEX_PRIVATE_FLAG)))) {
+    while (1) {
+      if (*uaddr != val)
+	return 0;
+      ult_yield();
+    }
+  } else {
+    return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+  }
 }
 
 static inline int
@@ -428,7 +440,7 @@ long hook_function(long a1, long a2, long a3,
 	  ult_yield();
 	}
       }
-#if 0
+#if 1
     case 202: // futex
       return hook_futex(a1, a2, a3, a4, a5, a6, a7);
 #endif // futex
