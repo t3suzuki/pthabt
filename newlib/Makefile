@@ -7,6 +7,7 @@ FLAGS = -O3 -g
 FLAGS += -fpic
 FLAGS += -DN_CORE=$(N_CORE) -DND=$(ND)
 FLAGS += -DUSE_PREEMPT=$(USE_PREEMPT)
+FLAGS += -DUSE_IO_URING=1
 #FLAGS += -DDEBUG=1
 
 #ABT_PATH ?= $(HOME)/argobots/install

@@ -17,6 +17,7 @@
 #include <time.h>
 #include <linux/aio_abi.h>
 #include <linux/futex.h>
+#include <liburing.h>
 #include <sys/syscall.h>
 
 #include "real_pthread.h"
@@ -210,6 +211,69 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 #endif
 }
 
+
+static struct io_uring ring[N_CORE];
+#define IO_URING_QD (N_ULT_PER_CORE*2)
+static int done_flag[N_CORE][IO_URING_QD];
+static int pending_req[N_CORE];
+
+static inline
+void __io_uring_check(int core_id)
+{
+  struct io_uring_cqe *cqe;
+  unsigned head;
+  int i = 0;
+  io_uring_for_each_cqe(&ring[core_id], head, cqe) {
+    if (cqe->res > 0) {
+      done_flag[core_id][cqe->user_data] = 1;
+      i++;
+    }
+  }
+  if (i > 0)
+    io_uring_cq_advance(&ring[core_id], i);
+}
+
+static inline
+void __io_uring_bottom(int core_id, int sqe_id)
+{
+  if (pending_req[core_id] > 0) {
+    io_uring_submit(&ring[core_id]);
+    pending_req[core_id] = 0;
+  }
+  while (1) {
+    ult_yield();
+    __io_uring_check(core_id);
+    if (done_flag[core_id][sqe_id])
+      break;
+  }
+}
+
+static inline
+void __io_uring_read(int fd, char *buf, size_t count, loff_t pos)
+{
+  
+  int core_id = ult_core_id();
+  struct io_uring_sqe *sqe = io_uring_get_sqe(&ring[core_id]);
+  io_uring_prep_read(sqe, fd, buf, count, pos);
+  int sqe_id = (sqe - ring[core_id].sq.sqes) / sizeof(struct io_uring_sqe);
+  sqe->user_data = sqe_id;
+  done_flag[core_id][sqe_id] = 0;
+  __io_uring_bottom(core_id, sqe_id);
+}
+
+static inline
+void __io_uring_write(int fd, char *buf, size_t count, loff_t pos)
+{
+  
+  int core_id = ult_core_id();
+  struct io_uring_sqe *sqe = io_uring_get_sqe(&ring[core_id]);
+  io_uring_prep_write(sqe, fd, buf, count, pos);
+  int sqe_id = (sqe - ring[core_id].sq.sqes) / sizeof(struct io_uring_sqe);
+  sqe->user_data = sqe_id;
+  done_flag[core_id][sqe_id] = 0;
+  __io_uring_bottom(core_id, sqe_id);
+}
+
 static inline int
 hook_openat(long a1, long a2, long a3,
 	    long a4, long a5, long a6,
@@ -328,8 +392,12 @@ long hook_function(long a1, long a2, long a3,
 	size_t count = a4;
 	int hookfd = hookfds[fd];
 	if (hookfd >= 0) {
+#if USE_IO_URING
+	  __io_uring_read(fd, buf, count, -1);
+#else
 	  read_impl(hookfd, count, cur_pos[fd], buf);
 	  cur_pos[fd] += count;
+#endif
 	  return count;
 	} else {
 	  return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -343,7 +411,11 @@ long hook_function(long a1, long a2, long a3,
 	loff_t pos = a5;
 	int hookfd = hookfds[fd];
 	if (hookfd >= 0) {
+#if USE_IO_URING
+	  __io_uring_read(fd, buf, count, pos);
+#else
 	  read_impl(hookfd, count, pos, buf);
+#endif
 	  return count;
 	} else {
 	  return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -351,12 +423,17 @@ long hook_function(long a1, long a2, long a3,
       }
     case SYS_write:
       {
+	int fd = a2;
 	int hookfd = hookfds[a2];
 	char *buf = (char *)a3;
 	loff_t len = a4;
 	if (hookfd >= 0) {
+#if USE_IO_URING
+	  __io_uring_write(fd, buf, len, -1);
+#else
 	  write_impl(hookfd, len, cur_pos[a2], buf);
 	  cur_pos[a2] += len;
+#endif
 	  return len;
 	} else {
 	  return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -364,6 +441,7 @@ long hook_function(long a1, long a2, long a3,
       }
     case 18: // pwrite64
       {
+	int fd = a2;
 	int hookfd = hookfds[a2];
 	char *buf = (char *)a3;
 	loff_t len = a4;
@@ -371,7 +449,11 @@ long hook_function(long a1, long a2, long a3,
 	//printf("pwrite64 %d hookfd=%d, len=%ld, pos=%ld\n", a2, hookfd, len, pos);
 	if (hookfd >= 0) {
 	  //printf("pwrite64 %d hookfd=%d, len=%ld, pos=%ld\n", a2, hookfd, len, pos);
+#if USE_IO_URING
+	  __io_uring_write(fd, buf, len, pos);
+#else
 	  write_impl(hookfd, len, pos, buf);
+#endif
 	  return len;
 	} else {
 	  return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -606,6 +688,11 @@ int __hook_init(long placeholder __attribute__((unused)),
   
   load_debug();
 
+#if USE_IO_URING
+  for (i=0; i<N_CORE; i++) {
+    io_uring_queue_init(IO_URING_QD, &ring[i], 0);
+  }
+#endif
   
   for (i=0; i<N_HELPER; i++) {
     helpers[i].id = i;
