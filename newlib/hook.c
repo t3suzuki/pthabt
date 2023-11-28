@@ -236,9 +236,11 @@ void __io_uring_check(int core_id)
 static inline
 void __io_uring_bottom(int core_id, int sqe_id)
 {
-  if (pending_req[core_id] > 0) {
+  if (pending_req[core_id] >= 0) {
     io_uring_submit(&ring[core_id]);
     pending_req[core_id] = 0;
+  } else {
+    pending_req[core_id]++;
   }
   while (1) {
     ult_yield();
@@ -288,7 +290,11 @@ hook_openat(long a1, long a2, long a3,
   if (is_hooked_filename(filename)) {
     printf("hooked file: fd=%d dfd=%d filename=%s flags=%o mode=%o\n", ret, dfd, filename, flags, mode);
     if (ret < MAX_HOOKFD) {
+#if USE_IO_URING
+      hookfds[ret] = 1;
+#else
       hookfds[ret] = myfs_open(filename);
+#endif
       cur_pos[ret] = 0;
     } else {
       printf("error: reached upper limit of opened files.\n");
@@ -379,7 +385,10 @@ long hook_function(long a1, long a2, long a3,
       {
 	int fd = a2;
 	if (hookfds[fd] >= 0) {
+#if USE_IO_URING
+#else
 	  myfs_close();
+#endif
 	  printf("close for mylib: fd=%d\n", fd);
 	  hookfds[fd] = NOT_USED_FD;
 	}
@@ -676,24 +685,15 @@ int __hook_init(long placeholder __attribute__((unused)),
 		void *sys_call_hook_ptr)
 {
 
-  char *myfs_superblock_path = getenv("MYFS_SUPERBLOCK_PATH");
-  assert(myfs_superblock_path);
-  myfs_mount(myfs_superblock_path);
-
-  init_hooked_filename();
   int i;
+  init_hooked_filename();
+  
   for (i=0; i<MAX_HOOKFD; i++) {
     hookfds[i] = NOT_USED_FD;
   }
   
   load_debug();
 
-#if USE_IO_URING
-  for (i=0; i<N_CORE; i++) {
-    io_uring_queue_init(IO_URING_QD, &ring[i], 0);
-  }
-#endif
-  
   for (i=0; i<N_HELPER; i++) {
     helpers[i].id = i;
     real_pthread_mutex_init(&helpers[i].mutex, NULL);
@@ -704,9 +704,18 @@ int __hook_init(long placeholder __attribute__((unused)),
   next_sys_call = *((syscall_fn_t *) sys_call_hook_ptr);
   *((syscall_fn_t *) sys_call_hook_ptr) = hook_function;
 
-
+#if USE_IO_URING
+  for (i=0; i<N_CORE; i++) {
+    io_uring_queue_init(IO_URING_QD, &ring[i], 0);
+  }
+#else
+  char *myfs_superblock_path = getenv("MYFS_SUPERBLOCK_PATH");
+  assert(myfs_superblock_path);
+  myfs_mount(myfs_superblock_path);
+  
   nvme_init();
-
+#endif
+  
   return 0;
 
 }
@@ -714,6 +723,9 @@ int __hook_init(long placeholder __attribute__((unused)),
 __attribute__((destructor(0xffff))) static void
 hook_deinit()
 {
+#if USE_IO_URING
+#else
   myfs_umount();
+#endif
 }
 
