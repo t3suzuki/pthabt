@@ -236,17 +236,24 @@ void __io_uring_check(int core_id)
 static inline
 void __io_uring_bottom(int core_id, int sqe_id)
 {
-  if (pending_req[core_id] >= 0) {
+  if (pending_req[core_id] >= 32) {
     io_uring_submit(&ring[core_id]);
     pending_req[core_id] = 0;
   } else {
     pending_req[core_id]++;
   }
+  int i = 0;
   while (1) {
     ult_yield();
     __io_uring_check(core_id);
     if (done_flag[core_id][sqe_id])
       break;
+    i++;
+    if ((i > 32) && (pending_req[core_id] > 0)) {
+      io_uring_submit(&ring[core_id]);
+      pending_req[core_id] = 0;
+      i = 0;
+    }
   }
 }
 
@@ -400,6 +407,7 @@ long hook_function(long a1, long a2, long a3,
 	char *buf = (char *)a3;
 	size_t count = a4;
 	int hookfd = hookfds[fd];
+	//printf("read %d %d\n", a2, hookfd);
 	if (hookfd >= 0) {
 #if USE_IO_URING
 	  __io_uring_read(fd, buf, count, -1);
