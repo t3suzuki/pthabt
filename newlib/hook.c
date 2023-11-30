@@ -216,6 +216,7 @@ static struct io_uring ring[N_CORE];
 #define IO_URING_QD (N_ULT_PER_CORE*2)
 static int done_flag[N_CORE][IO_URING_QD];
 static int pending_req[N_CORE];
+static int submit_cnt[N_CORE];
 
 static inline
 void __io_uring_check(int core_id)
@@ -236,24 +237,34 @@ void __io_uring_check(int core_id)
 static inline
 void __io_uring_bottom(int core_id, int sqe_id)
 {
+  int sub_cnt = -1;
   if (pending_req[core_id] >= 32) {
     io_uring_submit(&ring[core_id]);
     pending_req[core_id] = 0;
+    submit_cnt[core_id] = (submit_cnt[core_id] + 1) % 65536;
   } else {
     pending_req[core_id]++;
+    sub_cnt = submit_cnt[core_id];
+    int i = 0;
+    while (1) {
+      if (sub_cnt != submit_cnt[core_id]) {
+	break;
+      }
+      if (i > 32) {
+	io_uring_submit(&ring[core_id]);
+	pending_req[core_id] = 0;
+	submit_cnt[core_id] = (submit_cnt[core_id] + 1) % 65536;
+	break;
+      }
+      ult_yield();
+      i++;
+    }
   }
-  int i = 0;
   while (1) {
-    ult_yield();
     __io_uring_check(core_id);
     if (done_flag[core_id][sqe_id])
       break;
-    i++;
-    if ((i > 32) && (pending_req[core_id] > 0)) {
-      io_uring_submit(&ring[core_id]);
-      pending_req[core_id] = 0;
-      i = 0;
-    }
+    ult_yield();
   }
 }
 
@@ -264,7 +275,7 @@ void __io_uring_read(int fd, char *buf, size_t count, loff_t pos)
   int core_id = ult_core_id();
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring[core_id]);
   io_uring_prep_read(sqe, fd, buf, count, pos);
-  int sqe_id = (sqe - ring[core_id].sq.sqes) / sizeof(struct io_uring_sqe);
+  int sqe_id = ((uint64_t)sqe - (uint64_t)ring[core_id].sq.sqes) / sizeof(struct io_uring_sqe);
   sqe->user_data = sqe_id;
   done_flag[core_id][sqe_id] = 0;
   __io_uring_bottom(core_id, sqe_id);
@@ -715,6 +726,7 @@ int __hook_init(long placeholder __attribute__((unused)),
 #if USE_IO_URING
   for (i=0; i<N_CORE; i++) {
     io_uring_queue_init(IO_URING_QD, &ring[i], 0);
+    //io_uring_queue_init(IO_URING_QD, &ring[i], IORING_SETUP_SQPOLL);
   }
 #else
   char *myfs_superblock_path = getenv("MYFS_SUPERBLOCK_PATH");
