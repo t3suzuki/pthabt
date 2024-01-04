@@ -61,7 +61,7 @@ int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
   
 #if __PTHREAD_VERBOSE__
   unsigned long long abt_id;
-  ABT_thread_get_id(*abt_thread, (ABT_unit_id *)&abt_id);
+  ABT_thread_get_id(*abt_thread, (ABT_thread_id *)&abt_id);
   printf("%s %d ABT_id %llu @ core %d\n", __func__, __LINE__, abt_id, my_tid % N_CORE);
   //print_bt();
 #endif
@@ -99,7 +99,19 @@ int pthread_mutex_init(pthread_mutex_t *mutex,
 #endif
   abt_mutex_wrap_t *abt_mutex_wrap = (abt_mutex_wrap_t *)malloc(sizeof(abt_mutex_wrap_t));
   abt_mutex_wrap->magic = 0xdeadcafe;
-  int ret = ABT_mutex_create(&abt_mutex_wrap->abt_mutex);
+
+  int type;
+  pthread_mutexattr_gettype(attr, &type);
+  int ret;
+  if (type == PTHREAD_MUTEX_RECURSIVE) {
+    ABT_mutex_attr newattr;
+    ABT_mutex_attr_create(&newattr);
+    ABT_mutex_attr_set_recursive(newattr, ABT_TRUE);
+    ret = ABT_mutex_create_with_attr(newattr, &abt_mutex_wrap->abt_mutex);
+    ABT_mutex_attr_free(&newattr);
+  } else {
+    ret = ABT_mutex_create(&abt_mutex_wrap->abt_mutex);
+  }
   *(abt_mutex_wrap_t **)mutex = abt_mutex_wrap;
   return ret;
 }
