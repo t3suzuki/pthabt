@@ -511,6 +511,10 @@ nvme_check(int rid)
   //printf("%s %d rid=%d did=%d qid=%d\n", __func__, __LINE__, rid, did, qid);
   QP *qp = qps[did][qid];
   unsigned char c = qp->get_buf4k(cid)[0];
+
+  if (qp->done(cid)) {
+    return 1;
+  }
   
   qp->lock();
   qp->check_cq();

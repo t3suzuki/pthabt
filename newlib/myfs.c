@@ -28,10 +28,14 @@ typedef struct {
   uint64_t n_block;
 } file_t;
 
-union u {
+typedef union u {
   ABT_mutex abt;
   pthread_mutex_t pth;
-} myfs_file_mutex[MYFS_MAX_FILES];
+} u_mutex;
+
+u_mutex myfs_file_mutex[MYFS_MAX_FILES];
+u_mutex myfs_mutex;
+
 
 typedef struct {
   uint64_t magic;
@@ -70,8 +74,13 @@ myfs_init()
 
 uint64_t
 myfs_get_size(int i) {
-  printf("file %d get n_block %ld\n", i, superblock->file[i].n_block);
-  return superblock->file[i].n_block * MYFS_BLOCK_SIZE;
+  
+  //ult_mutex_lock((ult_mutex *)&myfs_file_mutex[i]);
+  uint64_t n_block = superblock->file[i].n_block;
+  //ult_mutex_unlock((ult_mutex *)&myfs_file_mutex[i]);
+  
+  printf("file %d get n_block %ld\n", i, n_block);
+  return n_block * MYFS_BLOCK_SIZE;
 }
 
 static int
@@ -110,10 +119,13 @@ myfs_open(const char *filename)
 {
   int i;
   int empty_i = -1;
+  
+  ult_mutex_lock((ult_mutex *)&myfs_mutex);
   for (i=0; i<MYFS_MAX_FILES; i++) {
     //printf("%d %s check %s %s\n", i, __func__, superblock->file[i].name, filename);
     if (strncmp(filename, superblock->file[i].name, strlen(filename)) == 0) {
-      //printf("%s found %s fileid=%d\n", __func__, filename, i);
+      ult_mutex_unlock((ult_mutex *)&myfs_mutex);
+      printf("%s found %s fileid=%d\n", __func__, filename, i);
       return i;
     }
     if ((empty_i == -1) && (superblock->file[i].name[0] == '\0')) {
@@ -123,6 +135,7 @@ myfs_open(const char *filename)
   printf("%s file not found. new fileid=%d for %s\n", __func__, empty_i, filename);
   strncpy(superblock->file[empty_i].name, filename, strlen(filename)+1);
   superblock->file[empty_i].n_block = 0;
+  ult_mutex_unlock((ult_mutex *)&myfs_mutex);
   return empty_i;
 }
 

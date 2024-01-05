@@ -115,11 +115,11 @@ static int cur_aio_max;
 int hookfds[MAX_HOOKFD];
 size_t cur_pos[MAX_HOOKFD];
 
-void
+inline void
 read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 {
   int core_id = ult_core_id();
-  //printf("%s fd=%d len=%d core=%d\n", __func__, hookfd, len, core_id);
+  //printf("%s fd=%d len=%d pos=%lld core=%d\n", __func__, hookfd, len, pos, core_id);
 #if 0
   if (pos % 512 != 0) {
     printf("error len %lu pos %lu %lu\n", len, pos, cur_pos[hookfd]);
@@ -136,7 +136,7 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 #if 0
   for (j=0; j<len; j+=blksz) {
     int64_t lba = myfs_get_lba(hookfd, pos + j, 0);
-    int rid = nvme_read_req(lba, blksz/512, core_id, MIN(blksz, len - j), buf + j);
+    int rid = nvme_read_req(lba, DIV_CEIL(blksz,512), core_id, MIN(blksz, len - j), buf + j);
     while (1) {
       if (nvme_check(rid))
 	break;
@@ -153,7 +153,7 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
       if (j >= len)
 	break;
       int64_t lba = myfs_get_lba(hookfd, pos + j, 0);
-      rid[rq_k] = nvme_read_req(lba, blksz/512, core_id, MIN(blksz, len - j), buf + j);
+      rid[rq_k] = nvme_read_req(lba, DIV_CEIL(blksz,512), core_id, MIN(blksz, len - j), buf + j);
       j += blksz;
     }
     for (k=0; k<rq_k; k++) {
@@ -180,7 +180,7 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
   for (j=0; j<len; j+=blksz) {
     int64_t lba = myfs_get_lba(hookfd, pos + j, 1);
     //printf("%s %d hookfd=%d len=%lu %lu pos =%lu\n", __func__, __LINE__, hookfd, len, j, pos);
-    int rid = nvme_write_req(lba, blksz/512, core_id, MIN(blksz, len - j), buf + j);
+    int rid = nvme_write_req(lba, DIV_CEIL(blksz,512), core_id, MIN(blksz, len - j), buf + j);
     while (1) {
       if (nvme_check(rid))
 	break;
@@ -195,7 +195,7 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
     int k;
     for (rq_k=0; rq_k<256; rq_k++) {
       int64_t lba = myfs_get_lba(hookfd, pos + j, 1);
-      rid[rq_k] = nvme_write_req(lba, blksz/512, core_id, MIN(blksz, len - j), buf + j);
+      rid[rq_k] = nvme_write_req(lba, DIV_CEIL(blksz,512), core_id, MIN(blksz, len - j), buf + j);
       j += blksz;
       if (j >= len)
 	break;
@@ -423,8 +423,10 @@ long hook_function(long a1, long a2, long a3,
 #if USE_IO_URING
 	  __io_uring_read(fd, buf, count, -1);
 #else
+	  //ult_mutex_lock();
 	  read_impl(hookfd, count, cur_pos[fd], buf);
 	  cur_pos[fd] += count;
+	  //ult_mutex_unlock();
 #endif
 	  return count;
 	} else {
@@ -438,6 +440,7 @@ long hook_function(long a1, long a2, long a3,
 	size_t count = a4;
 	loff_t pos = a5;
 	int hookfd = hookfds[fd];
+	//printf("pread64 %s %d %d\n", __func__, __LINE__, hookfd);
 	if (hookfd >= 0) {
 #if USE_IO_URING
 	  __io_uring_read(fd, buf, count, pos);
@@ -459,8 +462,10 @@ long hook_function(long a1, long a2, long a3,
 #if USE_IO_URING
 	  __io_uring_write(fd, buf, len, -1);
 #else
+	  //ult_mutex_lock();
 	  write_impl(hookfd, len, cur_pos[a2], buf);
 	  cur_pos[a2] += len;
+	  //ult_mutex_unlock();
 #endif
 	  return len;
 	} else {

@@ -3,11 +3,11 @@ N_CORE ?= 1
 ND ?= 1
 USE_PREEMPT ?= 1
 
-FLAGS = -O3 -g
+FLAGS = -O3 -g -march=native
 FLAGS += -fpic
 FLAGS += -DN_CORE=$(N_CORE) -DND=$(ND)
 FLAGS += -DUSE_PREEMPT=$(USE_PREEMPT)
-FLAGS += -DUSE_IO_URING=1
+#FLAGS += -DUSE_IO_URING=1
 #FLAGS += -DDEBUG=1
 
 #ABT_PATH ?= $(HOME)/argobots/install

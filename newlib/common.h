@@ -10,6 +10,8 @@
 #define MAX(x,y) ((x > y) ? x : y)
 #define MIN(x,y) ((x < y) ? x : y)
 
+#define DIV_CEIL(x,y) ((x+y-1)/y)
+
 extern void (*debug_print)(int, int, int);
 
 #ifndef USE_PTHPTH
