@@ -212,11 +212,11 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 }
 
 
-static struct io_uring ring[N_CORE];
+static struct io_uring ring[N_CORE][128];
 #define IO_URING_QD (N_ULT_PER_CORE*2)
 static int done_flag[N_CORE][IO_URING_QD];
-static int pending_req[N_CORE];
-static int submit_cnt[N_CORE];
+static int pending_req[N_CORE][128];
+static int submit_cnt[N_CORE][128];
 
 static inline
 void __io_uring_check(int core_id)
@@ -224,36 +224,36 @@ void __io_uring_check(int core_id)
   struct io_uring_cqe *cqe;
   unsigned head;
   int i = 0;
-  io_uring_for_each_cqe(&ring[core_id], head, cqe) {
+  io_uring_for_each_cqe(&ring[core_id][0], head, cqe) {
     if (cqe->res > 0) {
       done_flag[core_id][cqe->user_data] = 1;
       i++;
     }
   }
   if (i > 0)
-    io_uring_cq_advance(&ring[core_id], i);
+    io_uring_cq_advance(&ring[core_id][0], i);
 }
 
 static inline
 void __io_uring_bottom(int core_id, int sqe_id)
 {
   int sub_cnt = -1;
-  if (pending_req[core_id] >= 32) {
-    io_uring_submit(&ring[core_id]);
-    pending_req[core_id] = 0;
-    submit_cnt[core_id] = (submit_cnt[core_id] + 1) % 65536;
+  if (pending_req[core_id][0] >= 32) {
+    io_uring_submit(&ring[core_id][0]);
+    pending_req[core_id][0] = 0;
+    submit_cnt[core_id][0] = (submit_cnt[core_id][0] + 1) % 65536;
   } else {
-    pending_req[core_id]++;
-    sub_cnt = submit_cnt[core_id];
+    pending_req[core_id][0]++;
+    sub_cnt = submit_cnt[core_id][0];
     int i = 0;
     while (1) {
-      if (sub_cnt != submit_cnt[core_id]) {
+      if (sub_cnt != submit_cnt[core_id][0]) {
 	break;
       }
       if (i > 32) {
-	io_uring_submit(&ring[core_id]);
-	pending_req[core_id] = 0;
-	submit_cnt[core_id] = (submit_cnt[core_id] + 1) % 65536;
+	io_uring_submit(&ring[core_id][0]);
+	pending_req[core_id][0] = 0;
+	submit_cnt[core_id][0] = (submit_cnt[core_id][0] + 1) % 65536;
 	break;
       }
       ult_yield();
@@ -273,9 +273,9 @@ void __io_uring_read(int fd, char *buf, size_t count, loff_t pos)
 {
   
   int core_id = ult_core_id();
-  struct io_uring_sqe *sqe = io_uring_get_sqe(&ring[core_id]);
+  struct io_uring_sqe *sqe = io_uring_get_sqe(&ring[core_id][0]);
   io_uring_prep_read(sqe, fd, buf, count, pos);
-  int sqe_id = ((uint64_t)sqe - (uint64_t)ring[core_id].sq.sqes) / sizeof(struct io_uring_sqe);
+  int sqe_id = ((uint64_t)sqe - (uint64_t)ring[core_id][0].sq.sqes) / sizeof(struct io_uring_sqe);
   sqe->user_data = sqe_id;
   done_flag[core_id][sqe_id] = 0;
   __io_uring_bottom(core_id, sqe_id);
@@ -286,9 +286,9 @@ void __io_uring_write(int fd, char *buf, size_t count, loff_t pos)
 {
   
   int core_id = ult_core_id();
-  struct io_uring_sqe *sqe = io_uring_get_sqe(&ring[core_id]);
+  struct io_uring_sqe *sqe = io_uring_get_sqe(&ring[core_id][0]);
   io_uring_prep_write(sqe, fd, buf, count, pos);
-  int sqe_id = (sqe - ring[core_id].sq.sqes) / sizeof(struct io_uring_sqe);
+  int sqe_id = (sqe - ring[core_id][0].sq.sqes) / sizeof(struct io_uring_sqe);
   sqe->user_data = sqe_id;
   done_flag[core_id][sqe_id] = 0;
   __io_uring_bottom(core_id, sqe_id);
@@ -445,7 +445,20 @@ long hook_function(long a1, long a2, long a3,
 #if USE_IO_URING
 	  __io_uring_read(fd, buf, count, pos);
 #else
+#if 1
 	  read_impl(hookfd, count, pos, buf);
+#else
+	  {
+	    int64_t lba = myfs_get_lba(hookfd, pos, 0);
+	    int i_core = 0;
+	    int rid = nvme_read_req(lba, 1, i_core, 64, buf);
+	    while (1) {
+	      sched_yield();
+	      if (nvme_check(rid))
+		break;
+	    }
+	  }
+#endif
 #endif
 	  return count;
 	} else {
@@ -730,7 +743,7 @@ int __hook_init(long placeholder __attribute__((unused)),
 
 #if USE_IO_URING
   for (i=0; i<N_CORE; i++) {
-    io_uring_queue_init(IO_URING_QD, &ring[i], 0);
+    io_uring_queue_init(IO_URING_QD, &ring[i][0], 0);
     //io_uring_queue_init(IO_URING_QD, &ring[i], IORING_SETUP_SQPOLL);
   }
 #else
