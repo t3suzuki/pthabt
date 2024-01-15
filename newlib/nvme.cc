@@ -457,8 +457,18 @@ nvme_init()
     char pci_addr[13];
     //printf("nvme_init %d %d\n", j, uio_id);
     memcpy(pci_addr, &s[i], 12);
-    printf("nvme_init %d %s\n", j, pci_addr);
-    __nvme_init(j++, pci_addr);
+
+    char path[256];
+    sprintf(path, "/sys/bus/pci/drivers/uio_pci_generic/%s/", pci_addr);
+    int r = open(path, O_RDONLY);
+    if (r < 0) {
+      printf("skipping %s. It is not uio.\n", pci_addr);
+      exit(1);
+    } else {
+      printf("nvme_init %d %s\n", j, pci_addr);
+      __nvme_init(j++, pci_addr);
+    }
+    
     if (j == ND)
       break;
     while (s[i] != '_' && s[i] != '\0') {

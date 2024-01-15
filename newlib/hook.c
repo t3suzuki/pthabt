@@ -27,6 +27,7 @@
 #include "ult.h"
 
 #define N_HELPER (0)
+#define IO_URING_TH (8)
 
 typedef long (*syscall_fn_t)(long, long, long, long, long, long, long);
 static syscall_fn_t next_sys_call = NULL;
@@ -115,7 +116,7 @@ static int cur_aio_max;
 int hookfds[MAX_HOOKFD];
 size_t cur_pos[MAX_HOOKFD];
 
-inline void
+static inline void
 read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 {
   int core_id = ult_core_id();
@@ -238,7 +239,7 @@ static inline
 void __io_uring_bottom(int core_id, int sqe_id)
 {
   int sub_cnt = -1;
-  if (pending_req[core_id][0] >= 32) {
+  if (pending_req[core_id][0] >= IO_URING_TH) {
     io_uring_submit(&ring[core_id][0]);
     pending_req[core_id][0] = 0;
     submit_cnt[core_id][0] = (submit_cnt[core_id][0] + 1) % 65536;
@@ -250,7 +251,7 @@ void __io_uring_bottom(int core_id, int sqe_id)
       if (sub_cnt != submit_cnt[core_id][0]) {
 	break;
       }
-      if (i > 32) {
+      if (i > IO_URING_TH) {
 	io_uring_submit(&ring[core_id][0]);
 	pending_req[core_id][0] = 0;
 	submit_cnt[core_id][0] = (submit_cnt[core_id][0] + 1) % 65536;

@@ -28,13 +28,8 @@ typedef struct {
   uint64_t n_block;
 } file_t;
 
-typedef union u {
-  ABT_mutex abt;
-  pthread_mutex_t pth;
-} u_mutex;
-
-u_mutex myfs_file_mutex[MYFS_MAX_FILES];
-u_mutex myfs_mutex;
+ult_mutex myfs_file_mutex[MYFS_MAX_FILES];
+ult_mutex myfs_mutex;
 
 
 typedef struct {
