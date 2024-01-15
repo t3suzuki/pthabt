@@ -2,12 +2,13 @@
 N_CORE ?= 1
 ND ?= 1
 USE_PREEMPT ?= 1
+USE_IO_URING ?= 0
 
 FLAGS = -O3 -g -march=native
 FLAGS += -fpic
 FLAGS += -DN_CORE=$(N_CORE) -DND=$(ND)
 FLAGS += -DUSE_PREEMPT=$(USE_PREEMPT)
-#FLAGS += -DUSE_IO_URING=1
+FLAGS += -DUSE_IO_URING=$(USE_IO_URING)
 #FLAGS += -DDEBUG=1
 
 #ABT_PATH ?= $(HOME)/argobots/install
@@ -15,7 +16,7 @@ ABT_PATH ?= $(HOME)/work/github/ppopp21-preemption-artifact/argobots/install
 
 all:
 	g++ $(FLAGS) -c nvme.cc  -fno-exceptions -I $(ABT_PATH)/include
-	gcc $(FLAGS) -shared -o mylib.so mylib.c hook.c zpoline.c load_debug.c nvme.o myfs.c -I $(ABT_PATH)/include -L $(ABT_PATH)/lib -labt -lopcodes -lstdc++
+	gcc $(FLAGS) -shared -o mylib.so mylib.c hook.c zpoline.c load_debug.c nvme.o myfs.c -I $(ABT_PATH)/include -L $(ABT_PATH)/lib -labt -lopcodes -lstdc++ -luring
 	gcc $(FLAGS) -shared -o debug.so debug.c
 
 pth:
