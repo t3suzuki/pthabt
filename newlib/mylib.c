@@ -100,15 +100,19 @@ int pthread_mutex_init(pthread_mutex_t *mutex,
   abt_mutex_wrap_t *abt_mutex_wrap = (abt_mutex_wrap_t *)malloc(sizeof(abt_mutex_wrap_t));
   abt_mutex_wrap->magic = 0xdeadcafe;
 
-  int type;
-  pthread_mutexattr_gettype(attr, &type);
   int ret;
-  if (type == PTHREAD_MUTEX_RECURSIVE) {
-    ABT_mutex_attr newattr;
-    ABT_mutex_attr_create(&newattr);
-    ABT_mutex_attr_set_recursive(newattr, ABT_TRUE);
-    ret = ABT_mutex_create_with_attr(newattr, &abt_mutex_wrap->abt_mutex);
-    ABT_mutex_attr_free(&newattr);
+  if (attr) {
+    int type;
+    pthread_mutexattr_gettype(attr, &type);
+    if (type == PTHREAD_MUTEX_RECURSIVE) {
+      ABT_mutex_attr newattr;
+      ABT_mutex_attr_create(&newattr);
+      ABT_mutex_attr_set_recursive(newattr, ABT_TRUE);
+      ret = ABT_mutex_create_with_attr(newattr, &abt_mutex_wrap->abt_mutex);
+      ABT_mutex_attr_free(&newattr);
+    } else {
+      ret = ABT_mutex_create(&abt_mutex_wrap->abt_mutex);
+    }
   } else {
     ret = ABT_mutex_create(&abt_mutex_wrap->abt_mutex);
   }
