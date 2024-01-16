@@ -22,6 +22,7 @@ extern "C" {
 #include "nvme.h"
   
   //#define ND (1)
+#define NVME_NSID (1)
 #define NQ (N_CORE+1)
 #define QD (N_ULT_PER_CORE*2)
 #define AQD (8)
@@ -174,7 +175,7 @@ public:
     for (int i=0; i<n_sqe; i++) {
       sqe_t *sqe = get_sqe(i);
       bzero((void*)sqe, sizeof(sqe_t));
-      sqe->NSID = 1;
+      sqe->NSID = NVME_NSID;
       sqe->CDW0.CID = i;
     }
     doorbell = &regs32[0x1000 / sizeof(uint32_t) + 2 * qid];
