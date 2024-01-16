@@ -507,6 +507,9 @@ long hook_function(long a1, long a2, long a3,
 	}
       }
     case 262: // fstat
+#if USE_IO_URING
+      return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+#else
       if (((int32_t)a2 >= 0) && (hookfds[a2] >= 0)) {
 	uint64_t sz = myfs_get_size(hookfds[a2]);
 	struct stat *statbuf = (struct stat*)a4;
@@ -518,6 +521,7 @@ long hook_function(long a1, long a2, long a3,
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
+#endif
     case 230: // nanosleep
       return hook_clock_nanosleep(a2, a3, (struct timespec *)a4, (struct timespec *)a5);
     case 270: // select
