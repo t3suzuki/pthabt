@@ -358,13 +358,17 @@ int pthread_rwlock_destory(pthread_rwlock_t *rwlock)
 int pthread_once(pthread_once_t *once_control,
 		 void (*init_routine)(void)) {
 #if __PTHREAD_VERBOSE__
-  printf("%s %d\n", __func__, __LINE__);
+  printf("%s %d %p\n", __func__, __LINE__, once_control);
 #endif
   int old_val = 0;
   int new_val = 1;
   if (__sync_bool_compare_and_swap(once_control, 0, 1)) {
     printf("%s calling %p controlled by %p.\n", __func__, init_routine, once_control);
     init_routine();
+#if __PTHREAD_VERBOSE__
+    printf("%s %d %p\n", __func__, __LINE__, once_control);
+#endif
+    *once_control = 0;
     return 0;
   } else {
     return 1;
