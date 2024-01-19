@@ -121,6 +121,9 @@ __debug_init()
   def_syscall_name(262, "newfstatat");
   def_syscall_name(3, "close");
   def_syscall_name(1, "write");
+  def_syscall_name(17, "pread64");
+  def_syscall_name(18, "pwrite64");
+  def_syscall_name(426, "io_uring_enter");
   def_syscall_name(75, "fdatasync");
   def_syscall_name(0, "read");
   def_syscall_name(77, "ftruncate");
@@ -134,6 +137,7 @@ __debug_init()
   def_syscall_name(87, "unlink");
   
   def_syscall_name(99, "sysinfo");
+  def_syscall_name(10, "mprotect");
   
   def_syscall_name(9, "mmap");
   def_syscall_name(25, "mremap");

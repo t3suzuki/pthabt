@@ -236,11 +236,13 @@ public:
   void increment_read_count() {
     stat_read_count++;
     struct timespec tsc;
-    if (stat_read_count % (1024*1024) == 0) {
+    //const int unit = 1024*1024;
+    const int unit = 128*1024;
+    if (stat_read_count % unit == 0) {
       clock_gettime(CLOCK_MONOTONIC, &tsc);
       double cur = tsc.tv_sec + tsc.tv_nsec * 1e-9;
       double delta = cur - stat_read_lasttime;
-      printf("n_th %d, delta=%f, %f KIOPS\n", _qid, delta, 1024*1024/delta/1000);
+      printf("[NVMe STAT] qid %d, delta=%f, %f KIOPS\n", _qid, delta, unit/delta/1000);
       stat_read_lasttime = cur;
     }
   }
