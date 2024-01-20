@@ -3,53 +3,58 @@
 
 #include <stdlib.h>
 
-static int wp;
-static int rp;
-static int n;
+typedef struct {
+  int wp;
+  int rp;
+  int n;
+  int qd;
+  void **queue;
+} myfifo_t;
 
-static myfifo_entry_t queue[MYFIFO_QD];
 
-void
-myfifo_init()
+inline void
+myfifo_init(myfifo_t *myfifo, int qd)
 {
-  wp = 0;
-  rp = 0;
-  n = 0;
+  myfifo->wp = 0;
+  myfifo->rp = 0;
+  myfifo->n = 0;
+  myfifo->qd = qd;
+  myfifo->queue = (void *)malloc(qd * sizeof(void *));
 }
 
-int
-myfifo_push(myfifo_entry_t entry)
+inline int
+myfifo_push(myfifo_t *myfifo, void *entry)
 {
   int ret = 0;
   do {
-    if (n == MYFIFO_QD) {
+    if (myfifo->n == myfifo->qd) {
       return 0;
     } else {
-      int old_wp = wp;
-      int new_wp = (old_wp + 1) % MYFIFO_QD;
-      ret = __sync_bool_compare_and_swap(&wp, old_wp, new_wp);
+      int old_wp = myfifo->wp;
+      int new_wp = (old_wp + 1) % myfifo->qd;
+      ret = __sync_bool_compare_and_swap(&myfifo->wp, old_wp, new_wp);
       if (ret) {
-	queue[old_wp] = entry;
-	__sync_fetch_and_add(&n, 1);
+	myfifo->queue[old_wp] = entry;
+	__sync_fetch_and_add(&myfifo->n, 1);
       }
     }
   } while (ret == 0);
   return 1;
 }
 
-myfifo_entry_t
-myfifo_pop()
+inline void *
+myfifo_pop(myfifo_t *myfifo)
 {
   while (1) {
-    if (n == 0) {
-      return (myfifo_entry_t)NULL;
+    if (myfifo->n == 0) {
+      return (void *)NULL;
     } else {
-      int old_rp = rp;
-      int new_rp = (old_rp + 1) % MYFIFO_QD;
-      int ret = __sync_bool_compare_and_swap(&rp, old_rp, new_rp);
+      int old_rp = myfifo->rp;
+      int new_rp = (old_rp + 1) % myfifo->qd;
+      int ret = __sync_bool_compare_and_swap(&myfifo->rp, old_rp, new_rp);
       if (ret) {
-	__sync_fetch_and_add(&n, -1);
-	return queue[old_rp];
+	__sync_fetch_and_add(&myfifo->n, -1);
+	return myfifo->queue[old_rp];
       }
     }
   }

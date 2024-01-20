@@ -6,6 +6,7 @@
 #include "real_pthread.h"
 #include "common.h"
 #include "ult.h"
+#include "myfifo.h"
 #include <immintrin.h> 
 
 static ABT_xstream abt_xstreams[N_CORE];
@@ -100,15 +101,16 @@ typedef struct {
   void *next;
 } abt_cond_wrap_t;
 
-#define ABT_MUTEX_WRAP_INIT_NUM (N_CORE*N_ULT_PER_CORE*8)
-#define MYFIFO_QD (ABT_MUTEX_WRAP_INIT_NUM)
-typedef abt_mutex_wrap_t * myfifo_entry_t;
-#include "myfifo.h"
+#define N_INIT_ABT_MUTEX_WRAP (N_CORE*N_ULT_PER_CORE*8)
+#define N_INIT_ABT_COND_WRAP (N_CORE*N_ULT_PER_CORE*8)
+
+myfifo_t abt_mutex_wrap_fifo;
+myfifo_t abt_cond_wrap_fifo;
 
 inline abt_mutex_wrap_t *alloc_abt_mutex_wrap(void)
 {
 #if 1
-  abt_mutex_wrap_t *abt_mutex_wrap = myfifo_pop();
+  abt_mutex_wrap_t *abt_mutex_wrap = myfifo_pop(&abt_mutex_wrap_fifo);
   if (!abt_mutex_wrap) {
     abt_mutex_wrap = (abt_mutex_wrap_t *)malloc(sizeof(abt_mutex_wrap_t));
   }
@@ -121,7 +123,7 @@ inline abt_mutex_wrap_t *alloc_abt_mutex_wrap(void)
 inline void free_abt_mutex_wrap(abt_mutex_wrap_t *abt_mutex_wrap)
 {
 #if 1
-  if (!myfifo_push(abt_mutex_wrap))
+  if (!myfifo_push(&abt_mutex_wrap_fifo, abt_mutex_wrap))
     free(abt_mutex_wrap);
 #else
   free(abt_mutex_wrap);
@@ -129,12 +131,47 @@ inline void free_abt_mutex_wrap(abt_mutex_wrap_t *abt_mutex_wrap)
 }
 
 void
-init_abt_mutex_wrap(void)
+init_abt_mutex_wrap_fifo(void)
 {
   int i;
-  for (i=0; i<ABT_MUTEX_WRAP_INIT_NUM; i++) {
+  myfifo_init(&abt_mutex_wrap_fifo, N_INIT_ABT_MUTEX_WRAP);
+  for (i=0; i<N_INIT_ABT_MUTEX_WRAP; i++) {
     abt_mutex_wrap_t *abt_mutex_wrap = alloc_abt_mutex_wrap();
-    myfifo_push(abt_mutex_wrap);
+    myfifo_push(&abt_mutex_wrap_fifo, abt_mutex_wrap);
+  }
+}
+
+inline abt_cond_wrap_t *alloc_abt_cond_wrap(void)
+{
+#if 1
+  abt_cond_wrap_t *abt_cond_wrap = myfifo_pop(&abt_cond_wrap_fifo);
+  if (!abt_cond_wrap) {
+    abt_cond_wrap = (abt_cond_wrap_t *)malloc(sizeof(abt_cond_wrap_t));
+  }
+#else
+  abt_cond_wrap_t *abt_cond_wrap = (abt_cond_wrap_t *)malloc(sizeof(abt_cond_wrap_t));
+#endif
+  return abt_cond_wrap;
+}
+
+inline void free_abt_cond_wrap(abt_cond_wrap_t *abt_cond_wrap)
+{
+#if 1
+  if (!myfifo_push(&abt_cond_wrap_fifo, abt_cond_wrap))
+    free(abt_cond_wrap);
+#else
+  free(abt_cond_wrap);
+#endif
+}
+
+void
+init_abt_cond_wrap_fifo(void)
+{
+  int i;
+  myfifo_init(&abt_cond_wrap_fifo, N_INIT_ABT_COND_WRAP);
+  for (i=0; i<N_INIT_ABT_COND_WRAP; i++) {
+    abt_cond_wrap_t *abt_cond_wrap = alloc_abt_cond_wrap();
+    myfifo_push(&abt_cond_wrap_fifo, abt_cond_wrap);
   }
 }
 
@@ -312,7 +349,8 @@ int pthread_cond_init(pthread_cond_t *cond,
   //print_bt();
   printf("%s %d %p\n", __func__, __LINE__, cond);
 #endif
-  abt_cond_wrap_t *abt_cond_wrap = (abt_cond_wrap_t *)malloc(sizeof(abt_cond_wrap_t));
+  //abt_cond_wrap_t *abt_cond_wrap = (abt_cond_wrap_t *)malloc(sizeof(abt_cond_wrap_t));
+  abt_cond_wrap_t *abt_cond_wrap = alloc_abt_cond_wrap();
   abt_cond_wrap->magic = 0xdeadbeef;
 #if 1
   int ret = ABT_cond_create(&abt_cond_wrap->abt_cond);
@@ -365,7 +403,8 @@ int pthread_cond_destroy(pthread_cond_t *cond) {
   ABT_cond *abt_cond = get_abt_cond(cond);
   int ret = ABT_cond_free(abt_cond);
   abt_cond_wrap_t *abt_cond_wrap = *(abt_cond_wrap_t **)cond;
-  free(abt_cond_wrap);
+  //free(abt_cond_wrap);
+  free_abt_cond_wrap(abt_cond_wrap);
   return ret;
 }
 
@@ -604,7 +643,8 @@ abt_init()
   ABT_mutex_create(&abt_mutex_init_cond);
   ABT_mutex_create(&abt_mutex_init_mutex);
 
-  init_abt_mutex_wrap();
+  init_abt_mutex_wrap_fifo();
+  init_abt_cond_wrap_fifo();
 }
 
 
