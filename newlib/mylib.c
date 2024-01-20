@@ -99,7 +99,6 @@ typedef struct {
 } abt_cond_wrap_t;
 
 
-#if NEW_MUTEX
 int pthread_mutex_init(pthread_mutex_t *mutex,
 		       const pthread_mutexattr_t *attr) {
 #if __PTHREAD_VERBOSE__
@@ -107,6 +106,7 @@ int pthread_mutex_init(pthread_mutex_t *mutex,
 #endif
   abt_mutex_wrap_t *abt_mutex_wrap = (abt_mutex_wrap_t *)malloc(sizeof(abt_mutex_wrap_t));
   abt_mutex_wrap->magic = 0xdeadcafe;
+
   int ret;
   if (attr) {
     int type;
@@ -126,66 +126,29 @@ int pthread_mutex_init(pthread_mutex_t *mutex,
   *(abt_mutex_wrap_t **)mutex = abt_mutex_wrap;
   return ret;
 }
+
 inline static ABT_mutex *get_abt_mutex(pthread_mutex_t *mutex)
 {
   my_magic_t *p_magic = (my_magic_t *)mutex;
   my_magic_t old_magic = 0x0;
   my_magic_t new_magic = 0xffffffff;
+#if NEW_MUTEX
   if (__sync_bool_compare_and_swap(p_magic, old_magic, new_magic)) {
-    //printf("init...%lx\n", *p_magic);
     pthread_mutex_init(mutex, NULL);
   } else {
-    //printf("waiting...%lx\n", *p_magic);
     while (*p_magic == 0xffffffff)
       ABT_thread_yield();
   }
-  abt_mutex_wrap_t *abt_mutex_wrap = *(abt_mutex_wrap_t **)mutex;
-  return &abt_mutex_wrap->abt_mutex;
-}
 #else
-int pthread_mutex_init(pthread_mutex_t *mutex,
-		       const pthread_mutexattr_t *attr) {
-#if __PTHREAD_VERBOSE__
-  printf("%s %d %p\n", __func__, __LINE__, mutex);
-#endif
-  abt_mutex_wrap_t *abt_mutex_wrap = (abt_mutex_wrap_t *)malloc(sizeof(abt_mutex_wrap_t));
-  abt_mutex_wrap->magic = 0xdeadcafe;
-
-  int ret;
-  if (attr) {
-    int type;
-    pthread_mutexattr_gettype(attr, &type);
-    if (type == PTHREAD_MUTEX_RECURSIVE) {
-      ABT_mutex_attr newattr;
-      ABT_mutex_attr_create(&newattr);
-      ABT_mutex_attr_set_recursive(newattr, ABT_TRUE);
-      ret = ABT_mutex_create_with_attr(newattr, &abt_mutex_wrap->abt_mutex);
-      ABT_mutex_attr_free(&newattr);
-    } else {
-      ret = ABT_mutex_create(&abt_mutex_wrap->abt_mutex);
-    }
-  } else {
-    ret = ABT_mutex_create(&abt_mutex_wrap->abt_mutex);
-  }
-  *(abt_mutex_wrap_t **)mutex = abt_mutex_wrap;
-  return ret;
-}
-
-inline static ABT_mutex *get_abt_mutex(pthread_mutex_t *mutex)
-{
-  my_magic_t *p_magic = (my_magic_t *)mutex;
-  my_magic_t old_magic = 0x0;
-  my_magic_t new_magic = 0xdeadcafe;
-  //if (__sync_bool_compare_and_swap(p_magic, old_magic, new_magic)) {
   ABT_mutex_lock(abt_mutex_init_mutex);
   if (*p_magic == 0) { 
     pthread_mutex_init(mutex, NULL);
   }
   ABT_mutex_unlock(abt_mutex_init_mutex);
+#endif
   abt_mutex_wrap_t *abt_mutex_wrap = *(abt_mutex_wrap_t **)mutex;
   return &abt_mutex_wrap->abt_mutex;
 }
-#endif
 
 int pthread_mutex_lock(pthread_mutex_t *mutex) {
 #if __PTHREAD_VERBOSE__
@@ -216,7 +179,6 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex) {
   return ABT_mutex_unlock(*abt_mutex);
 }
 
-#if NEW_MUTEX
 int pthread_mutex_destroy(pthread_mutex_t *mutex) {
 #if __PTHREAD_VERBOSE__
   printf("%s %d\n", __func__, __LINE__);
@@ -227,18 +189,6 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex) {
   free(abt_mutex_wrap);
   return ret;
 }
-#else
-int pthread_mutex_destroy(pthread_mutex_t *mutex) {
-#if __PTHREAD_VERBOSE__
-  printf("%s %d\n", __func__, __LINE__);
-#endif
-  ABT_mutex *abt_mutex = get_abt_mutex(mutex);
-  int ret = ABT_mutex_free(abt_mutex);
-  abt_mutex_wrap_t *abt_mutex_wrap = *(abt_mutex_wrap_t **)mutex;
-  free(abt_mutex_wrap);
-  return ret;
-}
-#endif
 
 
 int pthread_cond_init(pthread_cond_t *cond,
@@ -260,12 +210,19 @@ int pthread_cond_init(pthread_cond_t *cond,
   return ret;
 }
 
-
 inline static ABT_cond *get_abt_cond(pthread_cond_t *cond)
 {
   my_magic_t *p_magic = (my_magic_t *)cond;
   my_magic_t old_magic = 0x0;
-  my_magic_t new_magic = 0xdeadcafe;
+  my_magic_t new_magic = 0xffffffff;
+#if NEW_MUTEX
+  if (__sync_bool_compare_and_swap(p_magic, old_magic, new_magic)) {
+    pthread_cond_init(cond, NULL);
+  } else {
+    while (*p_magic == 0xffffffff)
+      ABT_thread_yield();
+  }
+#else
   ABT_mutex_lock(abt_mutex_init_cond);
   if (*p_magic == 0) { 
     //printf("%s %d %p\n", __func__, __LINE__, cond);
@@ -273,6 +230,7 @@ inline static ABT_cond *get_abt_cond(pthread_cond_t *cond)
   } else {
   }
   ABT_mutex_unlock(abt_mutex_init_cond);
+#endif
   abt_cond_wrap_t *abt_cond_wrap = *(abt_cond_wrap_t **)cond;
   return &abt_cond_wrap->abt_cond;
 }
