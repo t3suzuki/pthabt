@@ -4,7 +4,8 @@
 #include <errno.h>
 #include "real_pthread.h"
 #include "common.h"
-
+#include "ult.h"
+#include <immintrin.h> 
 
 static ABT_xstream abt_xstreams[N_CORE];
 static ABT_thread abt_threads[N_ULT];
@@ -17,6 +18,8 @@ static ABT_preemption_group abt_preemption_group;
 static ABT_mutex abt_mutex_init_mutex;
 static ABT_mutex abt_mutex_init_cond;
 
+
+#define NEW_MUTEX (1)
 
 //#define __PTHREAD_VERBOSE__ (1)
 
@@ -67,7 +70,7 @@ int pthread_create(pthread_t *pth, const pthread_attr_t *attr,
   unsigned long long abt_id;
   ABT_thread_get_id(*abt_thread, (ABT_thread_id *)&abt_id);
   printf("%s %d tid %llu @ core %d\n", __func__, __LINE__, abt_id, my_tid % N_CORE);
-  //print_bt();
+  print_bt();
 #endif
   *pth = (pthread_t)abt_thread;
   return 0;
@@ -99,7 +102,10 @@ typedef struct {
 #if NEW_MUTEX
 int pthread_mutex_init(pthread_mutex_t *mutex,
 		       const pthread_mutexattr_t *attr) {
-  abt_mutex_wrap_t *abt_mutex_wrap = (abt_mutex_wrap_t *)mutex;
+#if __PTHREAD_VERBOSE__
+  printf("%s %d %p\n", __func__, __LINE__, mutex);
+#endif
+  abt_mutex_wrap_t *abt_mutex_wrap = (abt_mutex_wrap_t *)malloc(sizeof(abt_mutex_wrap_t));
   abt_mutex_wrap->magic = 0xdeadcafe;
   int ret;
   if (attr) {
@@ -118,6 +124,7 @@ int pthread_mutex_init(pthread_mutex_t *mutex,
     ret = ABT_mutex_create(&abt_mutex_wrap->abt_mutex);
   }
   *(abt_mutex_wrap_t **)mutex = abt_mutex_wrap;
+  return ret;
 }
 inline static ABT_mutex *get_abt_mutex(pthread_mutex_t *mutex)
 {
@@ -125,12 +132,15 @@ inline static ABT_mutex *get_abt_mutex(pthread_mutex_t *mutex)
   my_magic_t old_magic = 0x0;
   my_magic_t new_magic = 0xffffffff;
   if (__sync_bool_compare_and_swap(p_magic, old_magic, new_magic)) {
-    pthread_mutex_init(mutex, attr);
+    //printf("init...%lx\n", *p_magic);
+    pthread_mutex_init(mutex, NULL);
   } else {
-    while (*p_magic != 0xdeadcafe)
-      __mm_pause();
+    //printf("waiting...%lx\n", *p_magic);
+    while (*p_magic == 0xffffffff)
+      ABT_thread_yield();
   }
-  return ((abt_mutex_wrap_t*)mutex)->abt_mutex;
+  abt_mutex_wrap_t *abt_mutex_wrap = *(abt_mutex_wrap_t **)mutex;
+  return &abt_mutex_wrap->abt_mutex;
 }
 #else
 int pthread_mutex_init(pthread_mutex_t *mutex,
@@ -179,12 +189,12 @@ inline static ABT_mutex *get_abt_mutex(pthread_mutex_t *mutex)
 
 int pthread_mutex_lock(pthread_mutex_t *mutex) {
 #if __PTHREAD_VERBOSE__
-  printf("%s %d %p\n", __func__, __LINE__, mutex);
+  printf("%s %d %p tid=%lu\n", __func__, __LINE__, mutex, ult_id());
 #endif
   ABT_mutex *abt_mutex = get_abt_mutex(mutex);
   int ret = ABT_mutex_lock(*abt_mutex);
   if (ret) {
-    printf("%s %d %p\n", __func__, __LINE__, mutex, ret);
+    printf("%s %d %p ret %d\n", __func__, __LINE__, mutex, ret);
     print_bt();
   }
   return ret;
@@ -213,6 +223,8 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex) {
 #endif
   ABT_mutex *abt_mutex = get_abt_mutex(mutex);
   int ret = ABT_mutex_free(abt_mutex);
+  abt_mutex_wrap_t *abt_mutex_wrap = *(abt_mutex_wrap_t **)mutex;
+  free(abt_mutex_wrap);
   return ret;
 }
 #else
@@ -445,7 +457,7 @@ int pthread_once(pthread_once_t *once_control,
     *once_control = end_val;
   } else {
     while (*once_control != end_val)
-      __mm_pause();
+      _mm_pause();
   }
   return 0;
 }
@@ -524,11 +536,13 @@ abt_init()
 void __zpoline_init(void);
 
 
+/*
 #include "ult.h"
 pid_t gettid()
 {
   return ult_id();
 }
+*/
 
 int mylib_initialized = 0;
 
@@ -544,8 +558,6 @@ mylib_init()
     
     mylib_initialized = 1;
   }
-
-  printf("%d %d\n", sizeof(pthread_mutex_t), sizeof(ABT_mutex));
 }
 
 
