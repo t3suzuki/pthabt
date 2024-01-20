@@ -6,9 +6,12 @@
 #include "real_pthread.h"
 #include "common.h"
 #include "ult.h"
-#include "myfifo.h"
+#include "myfifo.hpp"
 #include <immintrin.h> 
 
+
+extern "C" {
+  
 static ABT_xstream abt_xstreams[N_CORE];
 static ABT_thread abt_threads[N_ULT];
 static ABT_pool global_abt_pools[N_CORE];
@@ -89,6 +92,11 @@ int pthread_detach(pthread_t pth) {
 }
 
 
+#define USE_MYFIFO (1)
+#define MYFIFO_QD (N_CORE*N_ULT_PER_CORE*8)
+#define N_INIT_ABT_MUTEX_WRAP (MYFIFO_QD - 1)
+#define N_INIT_ABT_COND_WRAP (MYFIFO_QD - 1)
+
 typedef unsigned int my_magic_t;
 typedef struct {
   my_magic_t magic;
@@ -100,17 +108,16 @@ typedef struct {
   ABT_cond abt_cond;
   void *next;
 } abt_cond_wrap_t;
-
-#define N_INIT_ABT_MUTEX_WRAP (N_CORE*N_ULT_PER_CORE*8)
-#define N_INIT_ABT_COND_WRAP (N_CORE*N_ULT_PER_CORE*8)
-
-myfifo_t abt_mutex_wrap_fifo;
-myfifo_t abt_cond_wrap_fifo;
+  
+  
+  
+static MyFIFO<MYFIFO_QD, abt_mutex_wrap_t> abt_mutex_wrap_fifo;
+static MyFIFO<MYFIFO_QD, abt_cond_wrap_t> abt_cond_wrap_fifo;
 
 inline abt_mutex_wrap_t *alloc_abt_mutex_wrap(void)
 {
-#if 1
-  abt_mutex_wrap_t *abt_mutex_wrap = myfifo_pop(&abt_mutex_wrap_fifo);
+#if USE_MYFIFO
+  abt_mutex_wrap_t *abt_mutex_wrap = abt_mutex_wrap_fifo.pop();
   if (!abt_mutex_wrap) {
     abt_mutex_wrap = (abt_mutex_wrap_t *)malloc(sizeof(abt_mutex_wrap_t));
   }
@@ -122,8 +129,8 @@ inline abt_mutex_wrap_t *alloc_abt_mutex_wrap(void)
 
 inline void free_abt_mutex_wrap(abt_mutex_wrap_t *abt_mutex_wrap)
 {
-#if 1
-  if (!myfifo_push(&abt_mutex_wrap_fifo, abt_mutex_wrap))
+#if USE_MYFIFO
+  if (!abt_mutex_wrap_fifo.push(abt_mutex_wrap))
     free(abt_mutex_wrap);
 #else
   free(abt_mutex_wrap);
@@ -134,17 +141,16 @@ void
 init_abt_mutex_wrap_fifo(void)
 {
   int i;
-  myfifo_init(&abt_mutex_wrap_fifo, N_INIT_ABT_MUTEX_WRAP);
   for (i=0; i<N_INIT_ABT_MUTEX_WRAP; i++) {
-    abt_mutex_wrap_t *abt_mutex_wrap = alloc_abt_mutex_wrap();
-    myfifo_push(&abt_mutex_wrap_fifo, abt_mutex_wrap);
+    abt_mutex_wrap_t *abt_mutex_wrap = (abt_mutex_wrap_t *)malloc(sizeof(abt_mutex_wrap_t));
+    abt_mutex_wrap_fifo.push(abt_mutex_wrap);
   }
 }
 
 inline abt_cond_wrap_t *alloc_abt_cond_wrap(void)
 {
-#if 1
-  abt_cond_wrap_t *abt_cond_wrap = myfifo_pop(&abt_cond_wrap_fifo);
+#if USE_MYFIFO
+  abt_cond_wrap_t *abt_cond_wrap = abt_cond_wrap_fifo.pop();
   if (!abt_cond_wrap) {
     abt_cond_wrap = (abt_cond_wrap_t *)malloc(sizeof(abt_cond_wrap_t));
   }
@@ -156,8 +162,8 @@ inline abt_cond_wrap_t *alloc_abt_cond_wrap(void)
 
 inline void free_abt_cond_wrap(abt_cond_wrap_t *abt_cond_wrap)
 {
-#if 1
-  if (!myfifo_push(&abt_cond_wrap_fifo, abt_cond_wrap))
+#if USE_MYFIFO
+  if (!abt_cond_wrap_fifo.push(abt_cond_wrap))
     free(abt_cond_wrap);
 #else
   free(abt_cond_wrap);
@@ -168,10 +174,9 @@ void
 init_abt_cond_wrap_fifo(void)
 {
   int i;
-  myfifo_init(&abt_cond_wrap_fifo, N_INIT_ABT_COND_WRAP);
   for (i=0; i<N_INIT_ABT_COND_WRAP; i++) {
-    abt_cond_wrap_t *abt_cond_wrap = alloc_abt_cond_wrap();
-    myfifo_push(&abt_cond_wrap_fifo, abt_cond_wrap);
+    abt_cond_wrap_t *abt_cond_wrap = (abt_cond_wrap_t *)malloc(sizeof(abt_cond_wrap_t));
+    abt_cond_wrap_fifo.push(abt_cond_wrap);
   }
 }
 
@@ -643,8 +648,6 @@ abt_init()
   ABT_mutex_create(&abt_mutex_init_cond);
   ABT_mutex_create(&abt_mutex_init_mutex);
 
-  init_abt_mutex_wrap_fifo();
-  init_abt_cond_wrap_fifo();
 }
 
 
@@ -665,6 +668,9 @@ __attribute__((constructor(0xffff))) static void
 mylib_init()
 {
   assert(sizeof(pthread_mutex_t) >= sizeof(abt_mutex_wrap_t));
+  // init fifo earlier (before using).
+  init_abt_mutex_wrap_fifo();
+  init_abt_cond_wrap_fifo();
   
   if (!mylib_initialized) {
     printf("Using %d cores.\n", N_CORE);
@@ -679,3 +685,5 @@ mylib_init()
 
 
 
+
+} // extern "C"
