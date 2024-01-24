@@ -16,6 +16,8 @@
 #include <time.h>
 #include <zlib.h>
 
+//#define NVME_DEBUG_STAT (1)
+
 //extern void (*debug_print)(long, long, long);
 
 extern "C" {
@@ -29,6 +31,15 @@ extern "C" {
 
 #define RAID_FACTOR (4096 / 512)
 #define N_2MB_PAGE MAX(QD * BLKSZ / (2*1024*1024), 1)
+
+#if NVME_DEBUG_STAT
+uint64_t debug_stat_req[NQ];
+uint64_t debug_stat_rreq[NQ];
+uint64_t debug_stat_wreq[NQ];
+uint64_t debug_stat_done[NQ];
+uint64_t debug_stat_cqdone[NQ];
+uint64_t debug_stat_newsqe[NQ];
+#endif
 
 
 static int enable_bus_master(char *pci_addr)
@@ -211,6 +222,9 @@ public:
     if (done_flag[sq_tail] == 0) {
       //printf("block %d %d\n", new_sq_tail, cq_head);
       while (done_flag[sq_tail] == 0) {
+#if NVME_DEBUG_STAT
+	debug_stat_newsqe[_qid]++;
+#endif
 	check_cq();
       }
     }
@@ -288,7 +302,7 @@ public:
 	  uint32_t checksum = crc32(0x80000000, (const unsigned char *)rbuf[cid], len[cid]);
 	  printf("cid=%d checksum=%08x len=%d lba=%ld\n", cid, checksum, len[cid], lba[cid]);
 	  */
-	  increment_read_count();
+	  //increment_read_count(); // Enabling this line may cause stop here. (including while-loop in new_sqe).
 	  /* {
 	    unsigned char *buf = (unsigned char *)rbuf[cid];
 	    printf("buf = %p\n", buf);
@@ -301,6 +315,9 @@ public:
 	    printf("\n");
 	    } */
 	}
+#if NVME_DEBUG_STAT
+	debug_stat_cqdone[_qid]++;
+#endif
 	done_flag[cid] = 1;
 	cq_head++;
 	if (cq_head == n_cqe) {
@@ -483,17 +500,26 @@ nvme_init()
   }
 }
 
+
 int
 nvme_read_req(int64_t lba, int num_blk, int core_id, int len, char *buf)
 {
+  
   int cid;
   int did = (lba / RAID_FACTOR) % ND;
   int qid = core_id + 1;
 
+
   QP *qp = qps[did][qid];
 
   qp->lock();
+#if NVME_DEBUG_STAT
+  debug_stat_req[qid] ++;
+#endif
   sqe_t *sqe = qp->new_sqe(&cid);
+#if NVME_DEBUG_STAT
+  debug_stat_rreq[qid] ++;
+#endif
   //bzero(sqe, sizeof(sqe_t));
   sqe->PRP1 = qp->buf4k_pa(cid);
   sqe->CDW0.OPC = 0x2; // read
@@ -526,6 +552,9 @@ nvme_check(int rid)
   unsigned char c = qp->get_buf4k(cid)[0];
 
   if (qp->done(cid)) {
+#if NVME_DEBUG_STAT
+    debug_stat_done[qid] ++;
+#endif
     return 1;
   }
   
@@ -534,6 +563,9 @@ nvme_check(int rid)
   qp->unlock();
   
   if (qp->done(cid)) {
+#if NVME_DEBUG_STAT
+    debug_stat_done[qid] ++;
+#endif
     return 1;
   }
   return 0;
@@ -547,6 +579,9 @@ nvme_write_req(int64_t lba, int num_blk, int core_id, int len, char *buf)
   int qid = core_id + 1;
   QP *qp = qps[did][qid];
 
+#if NVME_DEBUG_STAT
+  debug_stat_req[qid] ++;
+#endif
 
   qp->lock();
   sqe_t *sqe = qp->new_sqe(&cid);
@@ -572,7 +607,35 @@ nvme_write_req(int64_t lba, int num_blk, int core_id, int len, char *buf)
   }
   */
   //printf("%s rid = %d lba = %d buf=%p len=%d\n", __func__, rid, lba, buf, len);
+#if NVME_DEBUG_STAT
+  debug_stat_wreq[qid] ++;
+#endif
   return rid;
 }
 
+#if NVME_DEBUG_STAT
+  void nvme_debug_stat()
+  {
+    int qid, did;
+    printf("%s\n", __func__);
+    for (qid=0; qid<NQ; qid++) {
+      printf("qid=%d, req=%lu (%d+%d), newsqe_try=%lu, cqdone=%lu, done=%lu\n", qid,
+	     debug_stat_req[qid],
+	     debug_stat_rreq[qid],
+	     debug_stat_wreq[qid],
+	     debug_stat_newsqe[qid],
+	     debug_stat_cqdone[qid], debug_stat_done[qid]);
+      if (debug_stat_req[qid] != debug_stat_cqdone[qid]) {
+	for (did=0; did<ND; did++) {
+	  QP *qp = qps[did][qid];
+	  qp->lock();
+	  qp->check_cq();
+	  qp->unlock();
+	}
+      }
+    }
+  }
+#endif
+
+  
 } // extern "C"
