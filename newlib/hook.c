@@ -27,7 +27,8 @@
 #include "ult.h"
 
 #define N_HELPER (0)
-#define IO_URING_TH (8)
+#define IO_URING_TH (4)
+#define USE_IO_URING_SQPOLL (0)
 
 typedef long (*syscall_fn_t)(long, long, long, long, long, long, long);
 static syscall_fn_t next_sys_call = NULL;
@@ -121,6 +122,11 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 {
   int core_id = ult_core_id();
   //printf("%s fd=%d len=%d pos=%lld core=%d\n", __func__, hookfd, len, pos, core_id);
+
+  size_t file_size = myfs_get_size(hookfd);
+  if (pos + len > file_size) {
+    len = file_size - pos;
+  }
 #if 0
   if (pos % 512 != 0) {
     printf("error len %lu pos %lu %lu\n", len, pos, cur_pos[hookfd]);
@@ -214,7 +220,7 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 
 
 static struct io_uring ring[N_CORE][128];
-#define IO_URING_QD (N_ULT_PER_CORE*2)
+#define IO_URING_QD (N_ULT_PER_CORE*16)
 static int done_flag[N_CORE][IO_URING_QD];
 static int pending_req[N_CORE][128];
 static int submit_cnt[N_CORE][128];
@@ -238,8 +244,12 @@ void __io_uring_check(int core_id)
 static inline
 void __io_uring_bottom(int core_id, int sqe_id)
 {
+#if 0
+  io_uring_submit(&ring[core_id][0]);
+#else
   int sub_cnt = -1;
   if (pending_req[core_id][0] >= IO_URING_TH) {
+    //printf("io_uring_submit %d\n", core_id);
     io_uring_submit(&ring[core_id][0]);
     pending_req[core_id][0] = 0;
     submit_cnt[core_id][0] = (submit_cnt[core_id][0] + 1) % 65536;
@@ -252,6 +262,7 @@ void __io_uring_bottom(int core_id, int sqe_id)
 	break;
       }
       if (i > IO_URING_TH) {
+	//printf("io_uring_submit2 %d pend %d submitted %d\n", core_id, pending_req[core_id][0], submit_cnt[core_id][0]);
 	io_uring_submit(&ring[core_id][0]);
 	pending_req[core_id][0] = 0;
 	submit_cnt[core_id][0] = (submit_cnt[core_id][0] + 1) % 65536;
@@ -261,6 +272,7 @@ void __io_uring_bottom(int core_id, int sqe_id)
       i++;
     }
   }
+#endif
   while (1) {
     __io_uring_check(core_id);
     if (done_flag[core_id][sqe_id])
@@ -272,14 +284,15 @@ void __io_uring_bottom(int core_id, int sqe_id)
 static inline
 void __io_uring_read(int fd, char *buf, size_t count, loff_t pos)
 {
-  
   int core_id = ult_core_id();
+  //printf("Read core=%d fd=%d count=%lu pos=%lu\n", core_id, fd, count, pos);
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring[core_id][0]);
   io_uring_prep_read(sqe, fd, buf, count, pos);
   int sqe_id = ((uint64_t)sqe - (uint64_t)ring[core_id][0].sq.sqes) / sizeof(struct io_uring_sqe);
   sqe->user_data = sqe_id;
   done_flag[core_id][sqe_id] = 0;
   __io_uring_bottom(core_id, sqe_id);
+  //printf("Read Done core=%d fd=%d count=%lu pos=%lu\n", core_id, fd, count, pos);
 }
 
 static inline
@@ -287,12 +300,14 @@ void __io_uring_write(int fd, char *buf, size_t count, loff_t pos)
 {
   
   int core_id = ult_core_id();
+  //printf("Write core=%d fd=%d count=%lu pos=%lu\n", core_id, fd, count, pos);
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring[core_id][0]);
   io_uring_prep_write(sqe, fd, buf, count, pos);
-  int sqe_id = (sqe - ring[core_id][0].sq.sqes) / sizeof(struct io_uring_sqe);
+  int sqe_id = ((uint64_t)sqe - (uint64_t)ring[core_id][0].sq.sqes) / sizeof(struct io_uring_sqe);
   sqe->user_data = sqe_id;
   done_flag[core_id][sqe_id] = 0;
   __io_uring_bottom(core_id, sqe_id);
+  //printf("Write Done core=%d fd=%d count=%lu pos=%lu\n", core_id, fd, count, pos);
 }
 
 static inline int
@@ -307,7 +322,9 @@ hook_openat(long a1, long a2, long a3,
 
   int ret = next_sys_call(a1, a2, a3, a4, a5, a6, a7);
   if (is_hooked_filename(filename)) {
+#if DEBUG_HOOK_FILE
     printf("hooked file: fd=%d dfd=%d filename=%s flags=%o mode=%o\n", ret, dfd, filename, flags, mode);
+#endif
     if (ret < MAX_HOOKFD) {
 #if USE_IO_URING
       hookfds[ret] = 1;
@@ -394,7 +411,7 @@ long hook_function(long a1, long a2, long a3,
     */
 
     if (debug_print) {
-      debug_print(1, a1, 0);
+      debug_print(1, a1, ult_id());
     }
     
     switch (a1) {
@@ -441,7 +458,7 @@ long hook_function(long a1, long a2, long a3,
 	size_t count = a4;
 	loff_t pos = a5;
 	int hookfd = hookfds[fd];
-	//printf("pread64 %s %d %d\n", __func__, __LINE__, hookfd);
+	//printf("pread64 %s %d hookfd=%d count=%lu pos=%lu\n", __func__, __LINE__, hookfd, count, pos);
 	if (hookfd >= 0) {
 #if USE_IO_URING
 	  __io_uring_read(fd, buf, count, pos);
@@ -748,8 +765,11 @@ int __hook_init(long placeholder __attribute__((unused)),
 
 #if USE_IO_URING
   for (i=0; i<N_CORE; i++) {
+#if USE_IO_URING_SQPOLL
+    io_uring_queue_init(IO_URING_QD, &ring[i], IORING_SETUP_SQPOLL);
+#else
     io_uring_queue_init(IO_URING_QD, &ring[i][0], 0);
-    //io_uring_queue_init(IO_URING_QD, &ring[i], IORING_SETUP_SQPOLL);
+#endif
   }
 #else
   char *myfs_superblock_path = getenv("MYFS_SUPERBLOCK_PATH");
