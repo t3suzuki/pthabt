@@ -24,7 +24,7 @@ static ABT_mutex abt_mutex_init_mutex;
 static ABT_mutex abt_mutex_init_cond;
 
 
-#define NEW_MUTEX (1)
+  //#define NEW_MUTEX (1)
 
 //#define __PTHREAD_VERBOSE__ (1)
 
@@ -212,16 +212,17 @@ int pthread_mutex_init(pthread_mutex_t *mutex,
 
 inline static ABT_mutex *get_abt_mutex(pthread_mutex_t *mutex)
 {
-  my_magic_t *p_magic = (my_magic_t *)mutex;
+  volatile my_magic_t *p_magic = (my_magic_t *)mutex;
   my_magic_t old_magic = 0x0;
   my_magic_t new_magic = 0xffffffff;
 #if NEW_MUTEX
-  if (__sync_bool_compare_and_swap(p_magic, old_magic, new_magic)) {
-    pthread_mutex_init(mutex, NULL);
-  } else {
-    while (*p_magic == 0xffffffff)
-      ABT_thread_yield();
+  if (*p_magic == old_magic) { 
+    if (__sync_bool_compare_and_swap(p_magic, old_magic, new_magic)) {
+      pthread_mutex_init(mutex, NULL);
+    }
   }
+  while (*p_magic == 0xffffffff)
+    ABT_thread_yield();
 #else
   ABT_mutex_lock(abt_mutex_init_mutex);
   if (*p_magic == 0) { 
