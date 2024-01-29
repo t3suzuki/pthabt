@@ -425,7 +425,7 @@ long hook_function(long a1, long a2, long a3,
 #else
 	  myfs_close();
 #endif
-	  printf("close for mylib: fd=%d\n", fd);
+	  //printf("close for mylib: fd=%d\n", fd);
 	  hookfds[fd] = NOT_USED_FD;
 	}
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -533,7 +533,7 @@ long hook_function(long a1, long a2, long a3,
 	statbuf->st_size = sz;
 	statbuf->st_blocks = 512;
 	statbuf->st_blksize = sz / 512;
-	printf("fstat: file size = %ld fd=%ld\n", sz, a2);
+	//printf("fstat: file size = %ld fd=%ld\n", sz, a2);
 	return 0;
       } else {
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
