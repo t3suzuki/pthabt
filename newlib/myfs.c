@@ -67,7 +67,10 @@ myfs_mount(char *myfs_superblock)
     perror("open");
   }
   size_t page_size = getpagesize();
-  uint64_t mapped_size = 1024ULL*1024*1024;
+  struct stat statbuf;
+  fstat(superblock_fd, &statbuf);
+  uint64_t mapped_size = statbuf.st_size;
+  mapped_size = (mapped_size / page_size) * page_size;
   printf("sizeof(superblock_t)=%ld, mmapped_size=%ld\n", sizeof(superblock_t), mapped_size);
   superblock = (superblock_t *)mmap(0, mapped_size, PROT_READ|PROT_WRITE, MAP_SHARED, superblock_fd, 0);
   if (superblock == MAP_FAILED)
@@ -89,7 +92,7 @@ myfs_open(const char *filename)
     //printf("%d %s check %s %s\n", i, __func__, superblock->file[i].name, filename);
     if (strncmp(filename, superblock->file[i].name, strlen(filename)) == 0) {
       ult_mutex_unlock((ult_mutex *)&myfs_mutex);
-#if 1//DEBUG_HOOK_FILE
+#if 1 // DEBUG_HOOK_FILE
       printf("%s found %s fileid=%d\n", __func__, filename, i);
 #endif
       return i;
@@ -98,7 +101,7 @@ myfs_open(const char *filename)
       empty_i = i;
     }
   }
-#if 1 //DEBUG_HOOK_FILE
+#if 1 // DEBUG_HOOK_FILE
   printf("%s file not found. new fileid=%d for %s\n", __func__, empty_i, filename);
 #endif
   strncpy(superblock->file[empty_i].name, filename, strlen(filename)+1);
@@ -114,7 +117,7 @@ myfs_get_lba(int i, uint64_t offset, int write) {
   //printf("%s %d offset=%ld write=%d block=%d n_block=%d\n", __func__, i, offset, write, superblock->file[i].block[i_block], superblock->file[i].n_block);
   if (write > 0) {
     ult_mutex_lock((ult_mutex *)&myfs_file_mutex[i]);
-    printf("a fd=%d, i_block %d, block=%d rp=%d wp=%d\n", i, i_block, superblock->file[i].block[i_block], superblock->free_blocks_rp, superblock->free_blocks_wp);
+    //printf("a fd=%d, i_block %d, block=%d rp=%d wp=%d\n", i, i_block, superblock->file[i].block[i_block], superblock->free_blocks_rp, superblock->free_blocks_wp);
     if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
       {
 	int old_val;
@@ -132,8 +135,8 @@ myfs_get_lba(int i, uint64_t offset, int write) {
   }
   //printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE);
   if (superblock->file[i].block[i_block] == INACTIVE_BLOCK) {
-    fflush(0);
-    printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE); fflush(0);
+    //fflush(0);
+    //printf("%s fileid=%d i_block %d block %d offset %ld\n", __func__, i, i_block, superblock->file[i].block[i_block], (uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE); fflush(0);
     assert(superblock->file[i].block[i_block] != INACTIVE_BLOCK);
   }
   int64_t lba = ((uint64_t)superblock->file[i].block[i_block] * MYFS_BLOCK_SIZE + (offset % MYFS_BLOCK_SIZE)) / 512;
@@ -144,7 +147,7 @@ void
 myfs_close()
 {
   fsync(superblock_fd);
-#if 1//DEBUG_HOOK_FILE
+#if 1 //DEBUG_HOOK_FILE
   printf("%s %d  used_blocks=%d\n", __func__, __LINE__, myfs_used_blocks());
 #endif
 }

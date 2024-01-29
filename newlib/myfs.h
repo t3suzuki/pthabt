@@ -7,7 +7,6 @@ int myfs_open(const char *filename);
 int64_t myfs_get_lba(int i, uint64_t offset, int write);
 void myfs_umount(void);
 void myfs_close(void);
-uint64_t myfs_get_size(int i);
 
 #define MYFS_BLOCK_SIZE (2*1024*1024)
 #define NUM_BLOCKS (2*1024*1024)
