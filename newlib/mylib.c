@@ -24,7 +24,7 @@ static ABT_mutex abt_mutex_init_mutex;
 static ABT_mutex abt_mutex_init_cond;
 
 
-  //#define NEW_MUTEX (1)
+#define NEW_MUTEX (1)
 
 //#define __PTHREAD_VERBOSE__ (1)
 
