@@ -676,11 +676,12 @@ mylib_init()
   if (!mylib_initialized) {
     printf("Using %d cores.\n", N_CORE);
     
+    mylib_initialized = 1;
+    
     __zpoline_init();
     
     abt_init();
     
-    mylib_initialized = 1;
   }
 }
 

@@ -19,14 +19,14 @@
 ult_mutex myfs_file_mutex[MYFS_MAX_FILES];
 ult_mutex myfs_mutex;
 
+myfs_file_state_t myfs_file_states[MYFS_MAX_FILES];
+
 superblock_t *superblock;
 
 static int superblock_fd = -1;
 
-#define MAGIC (0xdeadcafebabefaceULL)
-
 static void
-myfs_init()
+myfs_superblock_init()
 {
   int i, j;
   printf("%s superblock_size = %lu\n", __func__, sizeof(superblock_t));
@@ -35,14 +35,13 @@ myfs_init()
     for (j=0; j<MYFS_MAX_BLOCKS_PER_FILE; j++) {
       superblock->file[i].block[j] = INACTIVE_BLOCK;
     }
-    ult_mutex_create(&myfs_file_mutex[i]);
   }
   for (i=0; i<NUM_BLOCKS-1; i++) {
     superblock->free_blocks[i] = i;
   }
   superblock->free_blocks_rp = 0;
   superblock->free_blocks_wp = NUM_BLOCKS - 1;
-  superblock->magic = MAGIC;
+  superblock->magic = MYFS_MAGIC;
 
 }
 
@@ -76,10 +75,73 @@ myfs_mount(char *myfs_superblock)
   if (superblock == MAP_FAILED)
     perror("mmap superblock file");
 
-  if (superblock->magic != MAGIC) {
-    myfs_init();
+  if (superblock->magic != MYFS_MAGIC) {
+    myfs_superblock_init();
+  }
+
+  int i;
+  for (i=0; i<MYFS_MAX_FILES; i++) {
+    myfs_file_states[i].flags = 0;
+    myfs_file_states[i].ref_count = 0;
+    ult_mutex_create(&myfs_file_mutex[i]);
+  }
+  ult_mutex_create(&myfs_mutex);
+}
+
+void
+__myfs_unlink(int fd)
+{
+  uint64_t j;
+  //printf("%s %d %lu wp=%u rp=%u\n", __func__, fd, superblock->file[fd].n_block, superblock->free_blocks_wp, superblock->free_blocks_rp);
+  for (j=0; j<superblock->file[fd].n_block; j++) {
+    int old_val;
+    while (1) {
+      old_val = superblock->free_blocks_wp;
+      int new_val = (old_val + 1) % NUM_BLOCKS;
+      if (__sync_bool_compare_and_swap(&superblock->free_blocks_wp, old_val, new_val))
+	break;
+    }
+    superblock->free_blocks[old_val] = superblock->file[fd].block[j];
+    superblock->file[fd].block[j] = INACTIVE_BLOCK;
+  }
+  superblock->file[fd].name[0] = '\0';
+  superblock->file[fd].n_block = 0;
+  //printf("%s %d %lu wp=%u rp=%u\n", __func__, fd, superblock->file[fd].n_block, superblock->free_blocks_wp, superblock->free_blocks_rp);
+  
+  myfs_file_states[fd].ref_count = 0;
+  myfs_file_states[fd].flags = 0;
+}
+
+void
+__myfs_try_unlink(int fd)
+{
+  myfs_file_states[fd].flags |= MYFS_FILE_UNLINKED;
+  if (myfs_file_states[fd].ref_count == 0) {
+    __myfs_unlink(fd);
   }
 }
+
+void
+myfs_unlink_fd(int fd)
+{
+  ult_mutex_lock((ult_mutex *)&myfs_mutex);
+  __myfs_try_unlink(fd);
+  ult_mutex_unlock((ult_mutex *)&myfs_mutex);  
+}
+
+void
+myfs_unlink(const char *filename)
+{
+  int i;
+  ult_mutex_lock((ult_mutex *)&myfs_mutex);
+  for (i=0; i<MYFS_MAX_FILES; i++) {
+    if (strncmp(filename, superblock->file[i].name, strlen(filename)) == 0) {
+      __myfs_try_unlink(i);
+    }
+  }  
+  ult_mutex_unlock((ult_mutex *)&myfs_mutex);
+}
+
 
 int
 myfs_open(const char *filename)
@@ -91,8 +153,9 @@ myfs_open(const char *filename)
   for (i=0; i<MYFS_MAX_FILES; i++) {
     //printf("%d %s check %s %s\n", i, __func__, superblock->file[i].name, filename);
     if (strncmp(filename, superblock->file[i].name, strlen(filename)) == 0) {
+      myfs_file_states[i].flags = MYFS_FILE_OPENED;
       ult_mutex_unlock((ult_mutex *)&myfs_mutex);
-#if 1 // DEBUG_HOOK_FILE
+#if DEBUG_HOOK_FILE
       printf("%s found %s fileid=%d\n", __func__, filename, i);
 #endif
       return i;
@@ -101,12 +164,14 @@ myfs_open(const char *filename)
       empty_i = i;
     }
   }
-#if 1 // DEBUG_HOOK_FILE
+#if DEBUG_HOOK_FILE
   printf("%s file not found. new fileid=%d for %s\n", __func__, empty_i, filename);
 #endif
   strncpy(superblock->file[empty_i].name, filename, strlen(filename)+1);
   superblock->file[empty_i].n_block = 0;
+  myfs_file_states[empty_i].flags = MYFS_FILE_OPENED;
   ult_mutex_unlock((ult_mutex *)&myfs_mutex);
+  
   return empty_i;
 }
 
@@ -123,13 +188,14 @@ myfs_get_lba(int i, uint64_t offset, int write) {
 	int old_val;
 	while (1) {
 	  old_val = superblock->free_blocks_rp;
-	  int new_val = old_val + 1;
+	  int new_val = (old_val + 1) % NUM_BLOCKS;
 	  if (__sync_bool_compare_and_swap(&superblock->free_blocks_rp, old_val, new_val))
 	    break;
 	}
 	superblock->file[i].block[i_block] = superblock->free_blocks[old_val];
       }
       superblock->file[i].n_block++;
+      //printf("a fd=%d, i_block %d, block=%d rp=%d wp=%d\n", i, i_block, superblock->file[i].block[i_block], superblock->free_blocks_rp, superblock->free_blocks_wp);
     }
     ult_mutex_unlock((ult_mutex*)&myfs_file_mutex[i]);
   }
@@ -143,8 +209,9 @@ myfs_get_lba(int i, uint64_t offset, int write) {
   return lba;
 }
 
+
 void
-myfs_close()
+myfs_sync()
 {
   fsync(superblock_fd);
 #if 1 //DEBUG_HOOK_FILE
@@ -153,9 +220,16 @@ myfs_close()
 }
 
 void
+myfs_close(int fd)
+{
+  myfs_file_states[fd].flags ^= MYFS_FILE_OPENED;
+  myfs_sync();
+}
+
+void
 myfs_umount()
 {
-  myfs_close();
+  myfs_sync();
 }
 
 

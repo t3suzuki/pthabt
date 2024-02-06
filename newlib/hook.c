@@ -123,6 +123,8 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
   int core_id = ult_core_id();
   //printf("%s fd=%d len=%d pos=%lld core=%d\n", __func__, hookfd, len, pos, core_id);
 
+  myfs_increment_ref(hookfd);
+  
   size_t file_size = myfs_get_size(hookfd);
   if (pos + len > file_size) {
     len = file_size - pos;
@@ -172,17 +174,23 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
     }
   }
 #endif
+  
+  myfs_decrement_ref(hookfd);
+  //printf("%s done! fd=%d len=%d pos=%lld core=%d\n", __func__, hookfd, len, pos, core_id);
 }
 
 void
 write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
 {
+
   int core_id = ult_core_id();
   assert(pos % 512 == 0);
+  
+  myfs_increment_ref(hookfd);
   int blksz = ((len % BLKSZ != 0) || (pos % BLKSZ != 0)) ? 512 : BLKSZ;
   
   int j;
-  //printf("%s %d %ld %ld %d\n", __func__, __LINE__, len, pos, blksz);
+  printf("%s %d hookfd=%d len=%ld pos=%ld %d\n", __func__, __LINE__, hookfd, len, pos, blksz);
 #if 0
   for (j=0; j<len; j+=blksz) {
     int64_t lba = myfs_get_lba(hookfd, pos + j, 1);
@@ -195,12 +203,13 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
     }
   }
 #else
-  int rid[256];
+#define WRITE_DEG (256)
+  int rid[WRITE_DEG];
   j = 0;
   while (j<len) {
     int rq_k;
     int k;
-    for (rq_k=0; rq_k<256; rq_k++) {
+    for (rq_k=0; rq_k<WRITE_DEG; rq_k++) {
       int64_t lba = myfs_get_lba(hookfd, pos + j, 1);
       rid[rq_k] = nvme_write_req(lba, DIV_CEIL(blksz,512), core_id, MIN(blksz, len - j), buf + j);
       j += blksz;
@@ -216,6 +225,9 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
     }
   }
 #endif
+  
+  //printf("%s done %d hookfd=%d len=%ld pos=%ld %d\n", __func__, __LINE__, hookfd, len, pos, blksz);
+  myfs_decrement_ref(hookfd);
 }
 
 
@@ -423,9 +435,9 @@ long hook_function(long a1, long a2, long a3,
 	if (hookfds[fd] >= 0) {
 #if USE_IO_URING
 #else
-	  myfs_close();
+	  myfs_close(hookfds[fd]);
 #endif
-	  //printf("close for mylib: fd=%d\n", fd);
+	  //printf("close for mylib: fd=%d hookfd=%d\n", fd, hookfds[fd]);
 	  hookfds[fd] = NOT_USED_FD;
 	}
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
@@ -541,6 +553,12 @@ long hook_function(long a1, long a2, long a3,
 #endif
     case 230: // nanosleep
       return hook_clock_nanosleep(a2, a3, (struct timespec *)a4, (struct timespec *)a5);
+    case 87: // unlink
+      {
+	char *pathname = (char *)a2;
+	myfs_unlink(pathname);
+	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
+      }
     case 270: // select
       {
 	struct timespec *ats = (struct timespec *) a6;
