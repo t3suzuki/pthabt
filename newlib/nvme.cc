@@ -151,7 +151,13 @@ private:
   volatile uint64_t *_regs64;
   
   uint64_t stat_read_count;
+  uint64_t stat_read_bytes;
+  uint64_t stat_last_read_bytes;
   double stat_read_lasttime;
+  uint64_t stat_write_count;
+  uint64_t stat_write_bytes;
+  uint64_t stat_last_write_bytes;
+  double stat_write_lasttime;
 public:
   void *rbuf[QD];
   int len[QD];
@@ -193,6 +199,15 @@ public:
 #if USE_PREEMPT
     ult_mutex_create(&mutex);
 #endif
+
+    stat_last_read_bytes = 0;
+    stat_read_bytes = 0;
+    stat_read_count = 0;
+    stat_read_lasttime = 0;
+    stat_last_write_bytes = 0;
+    stat_write_bytes = 0;
+    stat_write_count = 0;
+    stat_write_lasttime = 0;
   }
   inline void lock() {
 #if USE_PREEMPT
@@ -247,8 +262,9 @@ public:
     return buf4k[cid_upper] + BLKSZ * cid_lower;
   }
   
-  void increment_read_count() {
+  inline void increment_read_count(uint64_t len) {
     stat_read_count++;
+    stat_read_bytes += len;
     struct timespec tsc;
     //const int unit = 1024*1024;
     const int unit = 128*1024;
@@ -256,8 +272,28 @@ public:
       clock_gettime(CLOCK_MONOTONIC, &tsc);
       double cur = tsc.tv_sec + tsc.tv_nsec * 1e-9;
       double delta = cur - stat_read_lasttime;
-      printf("[NVMe STAT] qid %d, delta=%f, %f KIOPS\n", _qid, delta, unit/delta/1000);
+      uint64_t delta_bytes = stat_read_bytes - stat_last_read_bytes;
+      printf("[NVMe STAT] Read qid %d, delta=%f, %f KIOPS, %f Bps\n",
+	     _qid, delta, unit/delta/1000, delta_bytes/delta);
       stat_read_lasttime = cur;
+      stat_last_read_bytes = stat_read_bytes;
+    }
+  }
+
+  inline void increment_write_count(uint64_t len) {
+    stat_write_count++;
+    stat_write_bytes += len;
+    struct timespec tsc;
+    const int unit = 16*1024;
+    if (stat_write_count % unit == 0) {
+      clock_gettime(CLOCK_MONOTONIC, &tsc);
+      double cur = tsc.tv_sec + tsc.tv_nsec * 1e-9;
+      double delta = cur - stat_write_lasttime;
+      uint64_t delta_bytes = stat_write_bytes - stat_last_write_bytes;
+      printf("[NVMe STAT] Write qid %d, delta=%f, %f KIOPS, %f Bps\n",
+	     _qid, delta, unit/delta/1000, delta_bytes/delta);
+      stat_write_lasttime = cur;
+      stat_last_write_bytes = stat_write_bytes;
     }
   }
   
@@ -302,7 +338,7 @@ public:
 	  uint32_t checksum = crc32(0x80000000, (const unsigned char *)rbuf[cid], len[cid]);
 	  printf("cid=%d checksum=%08x len=%d lba=%ld\n", cid, checksum, len[cid], lba[cid]);
 	  */
-	  //increment_read_count(); // Enabling this line may cause stop here. (including while-loop in new_sqe).
+	  //increment_read_count(len[cid]); // Enabling this line may cause stop here. (including while-loop in new_sqe).
 	  /* {
 	    unsigned char *buf = (unsigned char *)rbuf[cid];
 	    printf("buf = %p\n", buf);
@@ -314,7 +350,10 @@ public:
 	    }
 	    printf("\n");
 	    } */
+	} else {
+	  //increment_write_count(len[cid]);
 	}
+	  
 #if NVME_DEBUG_STAT
 	debug_stat_cqdone[_qid]++;
 #endif
@@ -593,6 +632,7 @@ nvme_write_req(int64_t lba, int num_blk, int core_id, int len, char *buf)
   //printf("%s %d lba=%d num_blk=%d qid=%d len=%d cid=%d\n", __func__, __LINE__, lba, num_blk, qid, len, cid);
   qp->rbuf[cid] = NULL;
   qp->len[cid] = 0;
+  //qp->len[cid] = len;
   qp->sq_doorbell();
   qp->unlock();
   

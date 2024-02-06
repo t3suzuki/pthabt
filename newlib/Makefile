@@ -3,6 +3,8 @@ N_CORE ?= 1
 ND ?= 1
 USE_PREEMPT ?= 1
 USE_IO_URING ?= 0
+WRITE_DEG ?= 8
+READ_DEG ?= 256
 
 FLAGS = -O3 -g -march=native
 FLAGS += -fpic
@@ -10,6 +12,8 @@ FLAGS += -DN_CORE=$(N_CORE) -DND=$(ND)
 FLAGS += -DUSE_PREEMPT=$(USE_PREEMPT)
 FLAGS += -DUSE_IO_URING=$(USE_IO_URING)
 #FLAGS += -DDEBUG=1
+FLAGS += -DWRITE_DEG=$(WRITE_DEG)
+FLAGS += -DREAD_DEG=$(READ_DEG)
 
 #ABT_PATH ?= $(HOME)/argobots/install
 ABT_PATH ?= $(HOME)/work/github/ppopp21-preemption-artifact/argobots/install

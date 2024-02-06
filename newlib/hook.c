@@ -153,12 +153,12 @@ read_impl(int hookfd, loff_t len, loff_t pos, char *buf)
     }
   }
 #else
-  int rid[256];
+  int rid[READ_DEG];
   j = 0;
   while (j<len) {
     int rq_k;
     int k;
-    for (rq_k=0; rq_k<256; rq_k++) {
+    for (rq_k=0; rq_k<READ_DEG; rq_k++) {
       if (j >= len)
 	break;
       int64_t lba = myfs_get_lba(hookfd, pos + j, 0);
@@ -203,7 +203,6 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
     }
   }
 #else
-#define WRITE_DEG (256)
   int rid[WRITE_DEG];
   j = 0;
   while (j<len) {
@@ -379,7 +378,7 @@ hook_clock_nanosleep(clockid_t which_clock, int flags,
 {
   assert(which_clock == CLOCK_REALTIME);
   assert(flags == 0); // implemented relative time only.
-  //printf("%s clock=%d flags=%d\n", __func__, which_clock, flags);
+  //printf("%s clock=%d flags=%d tv_sec %d tv_nsec %d\n", __func__, which_clock, flags, req->tv_sec, req->tv_nsec);
   
   struct timespec alarm;
   clock_gettime(CLOCK_REALTIME_COARSE, &alarm);
@@ -483,7 +482,7 @@ long hook_function(long a1, long a2, long a3,
 	    int i_core = 0;
 	    int rid = nvme_read_req(lba, 1, i_core, 64, buf);
 	    while (1) {
-	      sched_yield();
+	      ult_yield();
 	      if (nvme_check(rid))
 		break;
 	    }
