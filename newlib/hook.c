@@ -190,7 +190,7 @@ write_impl(int hookfd, loff_t len, loff_t pos, char *buf)
   int blksz = ((len % BLKSZ != 0) || (pos % BLKSZ != 0)) ? 512 : BLKSZ;
   
   int j;
-  printf("%s %d hookfd=%d len=%ld pos=%ld %d\n", __func__, __LINE__, hookfd, len, pos, blksz);
+  //printf("%s %d hookfd=%d len=%ld pos=%ld %d\n", __func__, __LINE__, hookfd, len, pos, blksz);
 #if 0
   for (j=0; j<len; j+=blksz) {
     int64_t lba = myfs_get_lba(hookfd, pos + j, 1);

@@ -214,7 +214,7 @@ void
 myfs_sync()
 {
   fsync(superblock_fd);
-#if 1 //DEBUG_HOOK_FILE
+#if DEBUG_HOOK_FILE
   printf("%s %d  used_blocks=%d\n", __func__, __LINE__, myfs_used_blocks());
 #endif
 }
