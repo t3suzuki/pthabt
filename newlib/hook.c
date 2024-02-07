@@ -80,12 +80,45 @@ void do_helper(void *arg) {
   }
 }
 
-static char *hooked_filename;
+static char **hooked_filenames;
+static int n_hooked_filenames;
 static char *hooked_rocksdb_dir;
+
+void
+parse_hooked_filenames(char *s)
+{
+  n_hooked_filenames = 0;
+  int start = 0;
+  int i = 0;
+  while (s[i] != '\0') {
+    //printf("%c\n", s[i]);
+    if (s[i] == ':') {
+      n_hooked_filenames++;
+      hooked_filenames = (char **)realloc(hooked_filenames, sizeof(char *) * n_hooked_filenames);
+      hooked_filenames[n_hooked_filenames-1] = malloc(i);
+      //printf("%p, %p %d\n", hooked_filenames[n_hooked_filenames-1], &s[start], i);
+      memcpy(hooked_filenames[n_hooked_filenames-1], &s[start], i);
+      hooked_filenames[n_hooked_filenames-1][i] = '\0';
+      start = i + 1;
+    }
+    i++;
+  }
+  n_hooked_filenames++;
+  hooked_filenames = (char **)realloc(hooked_filenames, sizeof(char *) * n_hooked_filenames);
+  hooked_filenames[n_hooked_filenames-1] = malloc(i);
+  //printf("%p, %d\n", hooked_filenames[n_hooked_filenames-1], i);
+  memcpy(hooked_filenames[n_hooked_filenames-1], &s[start], i);
+  hooked_filenames[n_hooked_filenames-1][i] = '\0';
+}
+
 static void init_hooked_filename() {
-  hooked_filename = getenv("HOOKED_FILENAME");
-  if (hooked_filename) {
-    printf("hooked_filename : %s\n", hooked_filename);
+  char *hooked_filenames_str = getenv("HOOKED_FILENAMES");
+  if (hooked_filenames_str) {
+    parse_hooked_filenames(hooked_filenames_str);
+    int i;
+    for (i=0; i<n_hooked_filenames; i++) {
+      printf("hooked_filename[%d] : %s\n", i, hooked_filenames[i]);
+    }
   }
   hooked_rocksdb_dir = getenv("HOOKED_ROCKSDB_DIR");
   if (hooked_rocksdb_dir) {
@@ -96,8 +129,11 @@ static void init_hooked_filename() {
 static int is_hooked_filename(const char *filename)
 {
   int ret = 0;
-  if (hooked_filename) {
-    ret |= (strncmp(hooked_filename, filename, strlen(hooked_filename)) == 0);
+  if (hooked_filenames) {
+    int i;
+    for (i=0; i<n_hooked_filenames; i++) {
+      ret |= (strncmp(hooked_filenames[i], filename, strlen(hooked_filenames[i])) == 0);
+    }
   }
   if (hooked_rocksdb_dir) {
     const char sst_suffix[] = ".sst";
