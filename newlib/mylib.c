@@ -458,9 +458,16 @@ int pthread_cond_clockwait(pthread_cond_t *cond,
 			   clockid_t clk,
 			   const struct timespec *abstime) {
 #if __PTHREAD_VERBOSE__
-  printf("%s %d\n", __func__, __LINE__);
+  printf("%s %d %d\n", __func__, __LINE__, clk);
 #endif
-  return pthread_cond_timedwait(cond, mutex, abstime);
+  ABT_cond *abt_cond = get_abt_cond(cond);
+  ABT_mutex *abt_mutex = get_abt_mutex(mutex);
+  int ret = ABT_cond_clockwait(*abt_cond, *abt_mutex, clk, abstime);
+  if (ret == ABT_ERR_COND_TIMEDOUT) {
+    return ETIMEDOUT;
+  } else {
+    return 0;
+  }
 }
 
 
