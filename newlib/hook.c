@@ -591,7 +591,10 @@ long hook_function(long a1, long a2, long a3,
     case 87: // unlink
       {
 	char *pathname = (char *)a2;
+#if USE_IO_URING
+#else
 	myfs_unlink(pathname);
+#endif
 	return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
       }
     case 270: // select
