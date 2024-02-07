@@ -95,20 +95,20 @@ parse_hooked_filenames(char *s)
     if (s[i] == ':') {
       n_hooked_filenames++;
       hooked_filenames = (char **)realloc(hooked_filenames, sizeof(char *) * n_hooked_filenames);
-      hooked_filenames[n_hooked_filenames-1] = malloc(i);
+      printf("%s malloc(%d)\n", __func__, i+1);
+      hooked_filenames[n_hooked_filenames-1] = malloc(i+1);
       //printf("%p, %p %d\n", hooked_filenames[n_hooked_filenames-1], &s[start], i);
-      memcpy(hooked_filenames[n_hooked_filenames-1], &s[start], i);
-      hooked_filenames[n_hooked_filenames-1][i] = '\0';
+      strncpy(hooked_filenames[n_hooked_filenames-1], &s[start], i);
       start = i + 1;
     }
     i++;
   }
   n_hooked_filenames++;
   hooked_filenames = (char **)realloc(hooked_filenames, sizeof(char *) * n_hooked_filenames);
-  hooked_filenames[n_hooked_filenames-1] = malloc(i);
+  printf("%s malloc(%d)\n", __func__, i-start+1);
+  hooked_filenames[n_hooked_filenames-1] = malloc(i-start+1);
   //printf("%p, %d\n", hooked_filenames[n_hooked_filenames-1], i);
-  memcpy(hooked_filenames[n_hooked_filenames-1], &s[start], i);
-  hooked_filenames[n_hooked_filenames-1][i] = '\0';
+  strncpy(hooked_filenames[n_hooked_filenames-1], &s[start], i-start);
 }
 
 static void init_hooked_filename() {
