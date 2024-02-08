@@ -345,7 +345,7 @@ void __io_uring_read(int fd, char *buf, size_t count, loff_t pos)
 static inline
 void __io_uring_write(int fd, char *buf, size_t count, loff_t pos)
 {
-  
+#if 0
   int core_id = ult_core_id();
   //printf("Write core=%d fd=%d count=%lu pos=%lu\n", core_id, fd, count, pos);
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring[core_id][0]);
@@ -355,6 +355,22 @@ void __io_uring_write(int fd, char *buf, size_t count, loff_t pos)
   done_flag[core_id][sqe_id] = 0;
   __io_uring_bottom(core_id, sqe_id);
   //printf("Write Done core=%d fd=%d count=%lu pos=%lu\n", core_id, fd, count, pos);
+#else
+  int core_id = ult_core_id();
+  size_t unit = 32768;
+  size_t off;
+  for (off=0; off<count; off+=unit) {
+    //printf("Write core=%d fd=%d count=%lu pos=%lu\n", core_id, fd, count, pos);
+    size_t sz = (count - off) > unit ? unit : count - off;
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring[core_id][0]);
+    io_uring_prep_write(sqe, fd, buf+off, sz, pos+off);
+    int sqe_id = ((uint64_t)sqe - (uint64_t)ring[core_id][0].sq.sqes) / sizeof(struct io_uring_sqe);
+    sqe->user_data = sqe_id;
+    done_flag[core_id][sqe_id] = 0;
+    __io_uring_bottom(core_id, sqe_id);
+  }
+  //printf("Write Done core=%d fd=%d count=%lu pos=%lu\n", core_id, fd, count, pos);
+#endif
 }
 
 static inline int
@@ -539,6 +555,7 @@ long hook_function(long a1, long a2, long a3,
 	if (hookfd >= 0) {
 #if USE_IO_URING
 	  __io_uring_write(fd, buf, len, -1);
+	  //return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
 #else
 	  //ult_mutex_lock();
 	  write_impl(hookfd, len, cur_pos[a2], buf);
@@ -562,6 +579,7 @@ long hook_function(long a1, long a2, long a3,
 	  //printf("pwrite64 %d hookfd=%d, len=%ld, pos=%ld\n", a2, hookfd, len, pos);
 #if USE_IO_URING
 	  __io_uring_write(fd, buf, len, pos);
+	  //return next_sys_call(a1, a2, a3, a4, a5, a6, a7);
 #else
 	  write_impl(hookfd, len, pos, buf);
 #endif
