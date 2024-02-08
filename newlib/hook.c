@@ -331,6 +331,7 @@ void __io_uring_bottom(int core_id, int sqe_id)
 static inline
 void __io_uring_read(int fd, char *buf, size_t count, loff_t pos)
 {
+#if 0
   int core_id = ult_core_id();
   //printf("Read core=%d fd=%d count=%lu pos=%lu\n", core_id, fd, count, pos);
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring[core_id][0]);
@@ -340,6 +341,21 @@ void __io_uring_read(int fd, char *buf, size_t count, loff_t pos)
   done_flag[core_id][sqe_id] = 0;
   __io_uring_bottom(core_id, sqe_id);
   //printf("Read Done core=%d fd=%d count=%lu pos=%lu\n", core_id, fd, count, pos);
+#else
+  int core_id = ult_core_id();
+  size_t unit = 4096*256;
+  size_t off;
+  for (off=0; off<count; off+=unit) {
+    //printf("Write core=%d fd=%d count=%lu pos=%lu\n", core_id, fd, count, pos);
+    size_t sz = (count - off) > unit ? unit : count - off;
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&ring[core_id][0]);
+    io_uring_prep_read(sqe, fd, buf+off, sz, pos+off);
+    int sqe_id = ((uint64_t)sqe - (uint64_t)ring[core_id][0].sq.sqes) / sizeof(struct io_uring_sqe);
+    sqe->user_data = sqe_id;
+    done_flag[core_id][sqe_id] = 0;
+    __io_uring_bottom(core_id, sqe_id);
+  }
+#endif
 }
 
 static inline
