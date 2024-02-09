@@ -4,8 +4,8 @@
 template<int QD, class T>
 class MyFIFO {
 private:
-  int wp;
-  int rp;
+  volatile int wp;
+  volatile int rp;
   T *que[QD];
 public:
   MyFIFO() {
@@ -14,7 +14,7 @@ public:
   };
   bool push(T *entry) {
     while (1) {
-      int old_wp = wp;
+      volatile int old_wp = wp;
       int new_wp = (old_wp + 1) % QD;
       if (new_wp == rp) {
 	return false; // full
@@ -28,7 +28,7 @@ public:
   }
   T *pop() {
     while (1) {
-      int old_rp = rp;
+      volatile int old_rp = rp;
       int new_rp = (old_rp + 1) % QD;
       if (old_rp == wp) {
 	return nullptr; // empty
