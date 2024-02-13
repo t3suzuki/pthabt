@@ -13,7 +13,7 @@ void myfs_unlink_fd(int fd);
 #define MYFS_BLOCK_SIZE (2*1024*1024)
 #define NUM_BLOCKS (700*1024)
 
-#define MYFS_MAX_BLOCKS_PER_FILE (1024*64)
+#define MYFS_MAX_BLOCKS_PER_FILE (1024*128)
 #define MYFS_MAX_NAMELEN (1024)
 #define MYFS_MAX_FILES   (4096)
 

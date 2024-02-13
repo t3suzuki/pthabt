@@ -92,7 +92,7 @@ int pthread_detach(pthread_t pth) {
 }
 
 
-#define USE_MYFIFO (1)
+#define USE_MYFIFO (0)
 #define MYFIFO_QD (N_CORE*N_ULT_PER_CORE*8)
 #define N_INIT_ABT_MUTEX_WRAP (MYFIFO_QD - 1)
 #define N_INIT_ABT_COND_WRAP (MYFIFO_QD - 1)
@@ -358,7 +358,7 @@ int pthread_cond_init(pthread_cond_t *cond,
   //abt_cond_wrap_t *abt_cond_wrap = (abt_cond_wrap_t *)malloc(sizeof(abt_cond_wrap_t));
   abt_cond_wrap_t *abt_cond_wrap = alloc_abt_cond_wrap();
   abt_cond_wrap->magic = 0xdeadbeef;
-#if 1
+#if 0
   int ret = ABT_cond_create(&abt_cond_wrap->abt_cond);
 #else
   clockid_t clock_id;
@@ -662,13 +662,15 @@ abt_init()
 void __zpoline_init(void);
 
 
-/*
+#if 0
 #include "ult.h"
 pid_t gettid()
 {
+  printf("%d on %d\n", ult_id(), ult_core_id());
   return ult_id();
 }
-*/
+#endif
+
 
 int mylib_initialized = 0;
 
