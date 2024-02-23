@@ -16,7 +16,7 @@ FLAGS += -DWRITE_DEG=$(WRITE_DEG)
 FLAGS += -DREAD_DEG=$(READ_DEG)
 
 #ABT_PATH ?= $(HOME)/argobots/install
-ABT_PATH ?= $(HOME)/work/github/ppopp21-preemption-artifact/argobots/install
+ABT_PATH ?= /home/tomoya-s/work/github/ppopp21-preemption-artifact/argobots/install
 
 all:
 	g++ $(FLAGS) -c nvme.cc  -fno-exceptions -I $(ABT_PATH)/include
